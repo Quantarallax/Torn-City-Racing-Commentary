@@ -5,7 +5,8 @@
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @match        https://www.torn.com/page.php?sid=racing*
-// @match        https://www.torn.com/page.php*sid=racing*
+// @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
+// @downloadURL  https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle
