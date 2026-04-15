@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
-// @namespace    https://www.torn.com/
+// @namespace    sanxion.tc.racecommentary
 // @version      2.13.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
