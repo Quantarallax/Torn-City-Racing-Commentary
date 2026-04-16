@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.13.0
+// @version      2.15.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
-// @match        https://www.torn.com/page.php?sid=racing*
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
 // @downloadURL  https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
+// @match        https://www.torn.com/page.php?sid=racing*
+// @match        https://www.torn.com/page.php*sid=racing*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle
@@ -17,7 +18,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.13.0';
+    const SCRIPT_VERSION = '2.15.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -33,7 +34,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v23';
+    const STORAGE_KEY = 'tc_racecomm_v25';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -265,6 +266,14 @@
     let clearedForStatus = null;
     let isMinimised = false;
 
+    // Consecutive polls that have seen "not enough drivers" — requires 2 to confirm WAITING.
+    // Resets to 0 the moment any other status is detected, preventing stuck WAITING.
+    let waitingSeenCount = 0;
+
+    // After refreshing during a RACING session, suppress join-messages and show a
+    // "currently racing" summary instead. Set in loadState() when status is RACING.
+    let restoredIntoRacing = false;
+
     // ─── Persistence ─────────────────────────────────────────────────────────────
     function loadState () {
         try {
@@ -298,6 +307,8 @@
             (state.racers).forEach(function (r) { knownRacerNames.add(r.name); });
             currentStatus = state.status;
             clearedForStatus = state.status;
+            // Flag refresh during RACING so we show a summary instead of join messages
+            if (state.status === S.RACING) restoredIntoRacing = true;
         } catch (_) {}
     }
 
@@ -614,6 +625,8 @@
 
     function onStatusChange (oldSt, newSt) {
         resetTimers();
+        // Always reset the WAITING confirmation counter on any status transition
+        waitingSeenCount = 0;
 
         // Capture existing racers BEFORE any clear, so we can report paddock size
         const racersBeforeClear = state.racers.slice();
@@ -641,16 +654,20 @@
         if (newSt === S.PRE_LAUNCH) state.preLaunchMsgCount = 0;
 
         if (newSt === S.COUNTDOWN) {
-            // Count players already on track (excluding the player themselves)
-            const others = racersBeforeClear.filter(function (r) { return r.name !== state.playerName; });
-            if (others.length > 0) {
-                const n = others.length;
-                pushLine(
-                    'There ' + (n === 1 ? 'is' : 'are') + ' ' + n + ' player' + (n === 1 ? '' : 's') + ' already in the paddock.',
-                    'status'
-                );
+            // Do NOT show paddock/join messages if we're restoring from a RACING save.
+            // The page may briefly detect COUNTDOWN before settling on RACING; these
+            // messages would be wrong (the race has already started).
+            if (!restoredIntoRacing) {
+                const others = racersBeforeClear.filter(function (r) { return r.name !== state.playerName; });
+                if (others.length > 0) {
+                    const n = others.length;
+                    pushLine(
+                        'There ' + (n === 1 ? 'is' : 'are') + ' ' + n + ' player' + (n === 1 ? '' : 's') + ' already in the paddock.',
+                        'status'
+                    );
+                }
+                pushLine(fill('{player} has joined the track in {pos}.'), 'status', ICON.join);
             }
-            pushLine(fill('{player} has joined the track in {pos}.'), 'status', ICON.join);
         }
         if (newSt === S.PRE_LAUNCH && oldSt !== S.PRE_LAUNCH) {
             pushLine('Engines are revving — not long until launch.', 'status', ICON.prelaunch);
@@ -662,8 +679,12 @@
             pushLine('Not enough drivers to start this race. Waiting\u2026', 'waiting', ICON.wait);
         }
         if (newSt === S.RACING) {
-            const tn = state.track !== '—' ? state.track : 'this circuit';
-            pushLine("It's a green light — we are go on " + tn + "!", 'status', ICON.flag);
+            // Only fire the green-light message if this is a genuine new race start,
+            // not a restore bounce (COUNTDOWN→RACING on page load after refresh)
+            if (!restoredIntoRacing) {
+                const tn = state.track !== '—' ? state.track : 'this circuit';
+                pushLine("It's a green light — we are go on " + tn + "!", 'status', ICON.flag);
+            }
         }
         if (newSt === S.CRASHED) fireCrashSequence();
         if (newSt === S.MENU && oldSt !== S.MENU) {
@@ -705,7 +726,52 @@
     }
 
     // ─── Scrapers ─────────────────────────────────────────────────────────────────
-    function getPageText () { return document.body ? (document.body.innerText || '') : ''; }
+    // getPageText — uses a TreeWalker over visible text nodes only.
+    // Excludes our own HUD (#tc-rc-hud) and any element whose id or class
+    // looks like a userscript injection, preventing other running Tampermonkey
+    // scripts from interfering with status/text detection.
+    function getPageText () {
+        if (!document.body) return '';
+        try {
+            const excluded = document.getElementById('tc-rc-hud');
+            const parts = [];
+            const walker = document.createTreeWalker(
+                document.body,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function (node) {
+                        // Walk up to find if this node lives inside an excluded element
+                        let el = node.parentElement;
+                        while (el && el !== document.body) {
+                            if (el === excluded) return NodeFilter.FILTER_REJECT;
+                            // Skip elements that appear to be injected by other scripts
+                            // (common patterns: id/class starting with known prefixes,
+                            //  position:fixed overlays not part of Torn itself)
+                            const id = el.id || '';
+                            const cls = (el.className && typeof el.className === 'string')
+                                ? el.className : '';
+                            if (/^(tc-|torn-|tm-|gm-|us-)/i.test(id) ||
+                                /^(tc-|torn-|tm-|gm-|us-)/i.test(cls)) {
+                                return NodeFilter.FILTER_REJECT;
+                            }
+                            el = el.parentElement;
+                        }
+                        const txt = node.nodeValue || '';
+                        return txt.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+                    }
+                }
+            );
+            let node = walker.nextNode();
+            while (node) {
+                parts.push(node.nodeValue);
+                node = walker.nextNode();
+            }
+            return parts.join('\n');
+        } catch (_) {
+            // Fallback: innerText minus our HUD text
+            return document.body.innerText || '';
+        }
+    }
 
     function scrapeName () {
         const m = getPageText().match(/Name:\s+([A-Za-z0-9_\-[\]]+)/);
@@ -852,7 +918,16 @@
         if (text.toLowerCase().indexOf('crashed') !== -1 || document.querySelector('[class*="crashed"], [class*="wrecked"]')) return S.CRASHED;
         if (/race\s+finished/i.test(text) || /you\s+finished\s+in\s+\d/i.test(text) || document.querySelector('[class*="raceEnd"], [class*="raceFinished"]')) return S.ENDED;
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
-        if (/not\s+enough\s+drivers/i.test(text)) return S.WAITING;
+        if (/not\s+enough\s+drivers/i.test(text)) {
+            waitingSeenCount++;
+            // Require 2 consecutive polls to confirm WAITING — prevents false positives
+            // from cached page text during navigation
+            if (waitingSeenCount >= 2) return S.WAITING;
+            // Return current status while waiting for confirmation
+            return currentStatus === S.WAITING ? S.WAITING : (currentStatus || S.MENU);
+        }
+        // Text no longer present — reset counter so WAITING can't persist
+        waitingSeenCount = 0;
         const hasPRL = /race\s+will\s+start\s+in/i.test(text) || domContains(/race\s+will\s+start\s+in/i);
         if (hasPRL) {
             const comp = scrapeCompletion();
@@ -897,7 +972,21 @@
         if (newRacers.length) {
             state.prevRacers = state.racers.slice();
             state.racers = newRacers;
-            checkNewRacers();
+            if (restoredIntoRacing) {
+                // Refreshed during a race — add all current racers to known set silently
+                // then show a summary message once
+                newRacers.forEach(function (r) { knownRacerNames.add(r.name); });
+                if (newStatus === S.RACING) {
+                    const n = newRacers.length || state.racerCount || '?';
+                    pushLine(
+                        n + ' racer' + (n === 1 ? '' : 's') + ' currently competing. Resuming commentary\u2026',
+                        'status'
+                    );
+                    restoredIntoRacing = false;
+                }
+            } else {
+                checkNewRacers();
+            }
         }
 
         if (newStatus !== S.MENU) {
