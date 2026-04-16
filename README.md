@@ -13,4 +13,4 @@ See you on the tracks!
 
 Any questions, just message me in-game.
 
-Sanxion [2987640] https://www.torn.com/profiles.php?XID=2987640
+Sanxion [2987640] https://www.torn.com/2987640
