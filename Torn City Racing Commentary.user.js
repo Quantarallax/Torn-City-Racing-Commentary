@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.17.0
+// @version      2.18.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.17.0';
+    const SCRIPT_VERSION = '2.18.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v27';
+    const STORAGE_KEY = 'tc_racecomm_v28';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -671,7 +671,14 @@
                         'status'
                     );
                 }
-                pushLine(fill('{player} has joined the track in {pos}.'), 'status', ICON.join);
+                // Only show the join message when we have a real name and position.
+                // If either is still '—' the scrape hasn't resolved yet and the
+                // message would show "— has joined" or "Position has joined" etc.
+                const validName = state.playerName !== '—' && state.playerName !== '';
+                const validPos = parseInt(state.position, 10) >= 1;
+                if (validName && validPos) {
+                    pushLine(fill('{player} has joined the track in {pos}.'), 'status', ICON.join);
+                }
             }
         }
         if (newSt === S.PRE_LAUNCH && oldSt !== S.PRE_LAUNCH) {
