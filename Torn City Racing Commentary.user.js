@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.19.0
+// @version      2.20.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -20,7 +20,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.19.0';
+    const SCRIPT_VERSION = '2.20.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -36,7 +36,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v29';
+    const STORAGE_KEY = 'tc_racecomm_v30';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -1291,6 +1291,13 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         });
         document.getElementById('tc-btn-pause').addEventListener('click', function () {
             commentaryPaused = !commentaryPaused;
+            // Show a status message confirming the toggle. Status messages always
+            // bypass the pause filter so the user always sees this feedback.
+            if (commentaryPaused) {
+                pushLine('Commentary paused.', 'status');
+            } else {
+                pushLine('Commentary resumed.', 'status');
+            }
             updatePauseBtn();
         });
         document.getElementById('tc-btn-fix').addEventListener('click', function () {
@@ -1316,23 +1323,59 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     // ─── Boot ─────────────────────────────────────────────────────────────────────
     function injectStatcounter () {
         // Statcounter analytics for TORN CITY Race Commentary.
-        // Torn's CSP blocks dynamically injected external <script> tags, so we
-        // fire the hit directly via GM_xmlhttpRequest which bypasses CSP entirely.
-        // Statcounter records a pageview when their tracking image is fetched.
-        if (GM_getValue('tc_sc_fired_' + new Date().toDateString(), false)) return;
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: 'https://c.statcounter.com/13222568/0/69746abc/1/',
-            headers: {
-                Referer: 'https://www.torn.com/page.php?sid=racing',
-                'User-Agent': navigator.userAgent
-            },
-            onload: function () {
-                // Mark as fired once per calendar day to avoid duplicate hits
-                GM_setValue('tc_sc_fired_' + new Date().toDateString(), true);
-            },
-            onerror: function () {}
-        });
+        // Three-pronged approach to bypass Torn's CSP:
+        //  1) Hidden <img> tracking pixel — works if img-src allows c.statcounter.com
+        //  2) GM_xmlhttpRequest direct GET — runs outside CSP context, almost always works
+        //  3) fetch with no-cors as a final fallback
+        // Console logs included to make it easy to verify firing in DevTools.
+        const PIXEL_URL = 'https://c.statcounter.com/13222568/0/69746abc/1/';
+        const TAG = '[TC-RC Statcounter]';
+
+        // Method 1: hidden img element appended to our HUD area
+        try {
+            const img = new Image(1, 1);
+            img.referrerPolicy = 'no-referrer-when-downgrade';
+            img.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;';
+            img.alt = '';
+            img.onload = function () { console.log(TAG + ' image pixel fired OK'); };
+            img.onerror = function () { console.warn(TAG + ' image pixel blocked (CSP img-src)'); };
+            img.src = PIXEL_URL + '?t=' + Date.now();
+            (document.body || document.documentElement).appendChild(img);
+        } catch (e) {
+            console.warn(TAG + ' image method threw:', e);
+        }
+
+        // Method 2: GM_xmlhttpRequest — bypasses page CSP entirely
+        try {
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: PIXEL_URL + '?gm=' + Date.now(),
+                    headers: {
+                        Referer: 'https://www.torn.com/page.php?sid=racing',
+                        'User-Agent': navigator.userAgent
+                    },
+                    onload: function (r) { console.log(TAG + ' GM_xmlhttpRequest OK status=' + r.status); },
+                    onerror: function (e) { console.warn(TAG + ' GM_xmlhttpRequest error:', e); }
+                });
+            } else {
+                console.warn(TAG + ' GM_xmlhttpRequest not available — check @grant in header');
+            }
+        } catch (e) {
+            console.warn(TAG + ' GM_xmlhttpRequest threw:', e);
+        }
+
+        // Method 3: fetch no-cors as final fallback
+        try {
+            fetch(PIXEL_URL + '?f=' + Date.now(), {
+                method: 'GET',
+                mode: 'no-cors',
+                referrerPolicy: 'no-referrer-when-downgrade'
+            }).then(function () { console.log(TAG + ' fetch no-cors completed'); })
+              .catch(function (e) { console.warn(TAG + ' fetch failed:', e); });
+        } catch (e) {
+            console.warn(TAG + ' fetch threw:', e);
+        }
     }
 
     function init () {
