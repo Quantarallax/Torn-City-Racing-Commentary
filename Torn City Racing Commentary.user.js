@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.18.0
+// @version      2.19.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -10,6 +10,7 @@
 // @match        https://www.torn.com/page.php*sid=racing*
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
 // @connect      statcounter.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -19,7 +20,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.18.0';
+    const SCRIPT_VERSION = '2.19.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +36,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v28';
+    const STORAGE_KEY = 'tc_racecomm_v29';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -470,7 +471,9 @@
         state.racers.forEach(function (r, idx) {
             if (!knownRacerNames.has(r.name)) {
                 knownRacerNames.add(r.name);
-                if (knownRacerNames.size > 1) {
+                // Only announce if we have a real name (not a dash or empty string)
+                const validRacerName = r.name && r.name !== '—' && r.name.length > 1;
+                if (knownRacerNames.size > 1 && validRacerName) {
                     const posStr = ordinal(r.posNum || idx + 1);
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
@@ -1312,19 +1315,24 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 
     // ─── Boot ─────────────────────────────────────────────────────────────────────
     function injectStatcounter () {
-        // Statcounter usage analytics for TORN CITY Race Commentary
-        // Injected once per page load into the document head
-        if (document.getElementById('tc-statcounter-init')) return;
-        const cfg = document.createElement('script');
-        cfg.id = 'tc-statcounter-init';
-        cfg.type = 'text/javascript';
-        cfg.textContent = 'var sc_project=13222568;var sc_invisible=1;var sc_security="69746abc";';
-        document.head.appendChild(cfg);
-        const scr = document.createElement('script');
-        scr.type = 'text/javascript';
-        scr.src = 'https://www.statcounter.com/counter/counter.js';
-        scr.async = true;
-        document.head.appendChild(scr);
+        // Statcounter analytics for TORN CITY Race Commentary.
+        // Torn's CSP blocks dynamically injected external <script> tags, so we
+        // fire the hit directly via GM_xmlhttpRequest which bypasses CSP entirely.
+        // Statcounter records a pageview when their tracking image is fetched.
+        if (GM_getValue('tc_sc_fired_' + new Date().toDateString(), false)) return;
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: 'https://c.statcounter.com/13222568/0/69746abc/1/',
+            headers: {
+                Referer: 'https://www.torn.com/page.php?sid=racing',
+                'User-Agent': navigator.userAgent
+            },
+            onload: function () {
+                // Mark as fired once per calendar day to avoid duplicate hits
+                GM_setValue('tc_sc_fired_' + new Date().toDateString(), true);
+            },
+            onerror: function () {}
+        });
     }
 
     function init () {
