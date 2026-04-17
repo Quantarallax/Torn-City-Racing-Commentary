@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.15.0
+// @version      2.16.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -10,6 +10,7 @@
 // @match        https://www.torn.com/page.php*sid=racing*
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @connect      statcounter.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -18,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.15.0';
+    const SCRIPT_VERSION = '2.16.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -34,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v25';
+    const STORAGE_KEY = 'tc_racecomm_v26';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -726,49 +727,28 @@
     }
 
     // ─── Scrapers ─────────────────────────────────────────────────────────────────
-    // getPageText — uses a TreeWalker over visible text nodes only.
-    // Excludes our own HUD (#tc-rc-hud) and any element whose id or class
-    // looks like a userscript injection, preventing other running Tampermonkey
-    // scripts from interfering with status/text detection.
+    // getPageText — clones the body, removes our HUD and any other injected
+    // overlay elements before reading innerText. This is the most reliable way
+    // to isolate Torn's own page text from other running Tampermonkey scripts,
+    // without complex TreeWalker filtering that can miss edge cases.
     function getPageText () {
         if (!document.body) return '';
         try {
-            const excluded = document.getElementById('tc-rc-hud');
-            const parts = [];
-            const walker = document.createTreeWalker(
-                document.body,
-                NodeFilter.SHOW_TEXT,
-                {
-                    acceptNode: function (node) {
-                        // Walk up to find if this node lives inside an excluded element
-                        let el = node.parentElement;
-                        while (el && el !== document.body) {
-                            if (el === excluded) return NodeFilter.FILTER_REJECT;
-                            // Skip elements that appear to be injected by other scripts
-                            // (common patterns: id/class starting with known prefixes,
-                            //  position:fixed overlays not part of Torn itself)
-                            const id = el.id || '';
-                            const cls = (el.className && typeof el.className === 'string')
-                                ? el.className : '';
-                            if (/^(tc-|torn-|tm-|gm-|us-)/i.test(id) ||
-                                /^(tc-|torn-|tm-|gm-|us-)/i.test(cls)) {
-                                return NodeFilter.FILTER_REJECT;
-                            }
-                            el = el.parentElement;
-                        }
-                        const txt = node.nodeValue || '';
-                        return txt.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
-                    }
-                }
+            const clone = document.body.cloneNode(true);
+            // Remove our own HUD
+            const ownHud = clone.querySelector('#tc-rc-hud');
+            if (ownHud) ownHud.parentNode.removeChild(ownHud);
+            // Remove any position:fixed or position:absolute overlays injected
+            // by other scripts (common pattern for Tampermonkey UI injections).
+            // We identify them by checking for elements that sit outside the
+            // normal Torn page DOM structure — fixed-position divs with custom ids.
+            const overlays = clone.querySelectorAll(
+                '[id^="tc-"],[id^="torn-"],[id^="tm-"],[id^="gm-"],' +
+                '[class^="tc-"],[class^="torn-"],[class^="tm-"],[class^="gm-"]'
             );
-            let node = walker.nextNode();
-            while (node) {
-                parts.push(node.nodeValue);
-                node = walker.nextNode();
-            }
-            return parts.join('\n');
+            overlays.forEach(function (el) { el.parentNode.removeChild(el); });
+            return clone.innerText || '';
         } catch (_) {
-            // Fallback: innerText minus our HUD text
             return document.body.innerText || '';
         }
     }
@@ -1152,7 +1132,7 @@
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
 .st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
-#tc-rc-lb-col{position:absolute;top:0;left:0;bottom:0;width:124px;border-right:1px solid var(--c-border2);background:var(--c-bg2);display:flex;flex-direction:column;overflow:hidden;z-index:2;}
+#tc-rc-lb-col{position:absolute;top:0;left:0;bottom:0;width:142px;border-right:1px solid var(--c-border2);background:var(--c-bg2);display:flex;flex-direction:column;overflow:hidden;z-index:2;}
 #tc-rc-lb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:3px 0;min-height:0;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
 #tc-rc-stats{flex-shrink:0;border-top:1px solid var(--c-border2);padding:5px 6px 7px;background:var(--c-bg2);}
 .tc-stats-row1{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:3px;}
@@ -1173,7 +1153,7 @@
 .tc-lb-row.lb-me .tc-lb-name{color:#ffe060;}
 a.tc-link{color:inherit;text-decoration:none;transition:color .15s;}
 a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
-#tc-rc-feed-col{position:absolute;top:0;left:125px;right:0;bottom:0;display:flex;flex-direction:column;overflow:hidden;}
+#tc-rc-feed-col{position:absolute;top:0;left:143px;right:0;bottom:0;display:flex;flex-direction:column;overflow:hidden;}
 .tc-col-hdr{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;padding:5px 8px 4px;border-bottom:1px solid var(--c-border2);flex-shrink:0;white-space:nowrap;}
 #tc-feed-inner{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:10px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
 .tc-fl{display:flex;align-items:flex-start;gap:5px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:400;line-height:1.5;padding:3px 10px;border-left:2px solid transparent;color:var(--c-muted);word-break:break-word;flex-shrink:0;width:100%;box-sizing:border-box;}
@@ -1320,6 +1300,22 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     }
 
     // ─── Boot ─────────────────────────────────────────────────────────────────────
+    function injectStatcounter () {
+        // Statcounter usage analytics for TORN CITY Race Commentary
+        // Injected once per page load into the document head
+        if (document.getElementById('tc-statcounter-init')) return;
+        const cfg = document.createElement('script');
+        cfg.id = 'tc-statcounter-init';
+        cfg.type = 'text/javascript';
+        cfg.textContent = 'var sc_project=13222568;var sc_invisible=1;var sc_security="69746abc";';
+        document.head.appendChild(cfg);
+        const scr = document.createElement('script');
+        scr.type = 'text/javascript';
+        scr.src = 'https://www.statcounter.com/counter/counter.js';
+        scr.async = true;
+        document.head.appendChild(scr);
+    }
+
     function init () {
         loadState();
         commentaryPaused = false;
@@ -1331,6 +1327,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         renderRaceStats();
         updatePauseBtn();
         resetTimers();
+        injectStatcounter();
         poll();
         setInterval(poll, POLL_MS);
     }
