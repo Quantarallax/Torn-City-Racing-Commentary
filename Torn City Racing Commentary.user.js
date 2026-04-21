@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.21.0
+// @version      2.22.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -18,7 +18,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.21.0';
+    const SCRIPT_VERSION = '2.22.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -34,7 +34,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v31';
+    const STORAGE_KEY = 'tc_racecomm_v32';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -1319,6 +1319,29 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     }
 
     // ─── Boot ─────────────────────────────────────────────────────────────────────
+    // Fires a 1x1 invisible tracking pixel to c.statcounter.com by appending a
+    // hidden <img> element to the page body. Waits for the window 'load' event
+    // first (or fires immediately if the page has already loaded) so it behaves
+    // like a standard bottom-of-page analytics snippet. The { once: true } option
+    // on the listener removes it automatically after it fires.
+    function fireStatcounterPixel () {
+        try {
+            const img = document.createElement('img');
+            img.src = 'https://c.statcounter.com/13222568/0/69746abc/1/';
+            img.alt = '';
+            img.width = 1;
+            img.height = 1;
+            img.style.cssText = 'position:absolute;border:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+            (document.body || document.documentElement).appendChild(img);
+        } catch (_) {}
+    }
+
+    if (document.readyState === 'complete') {
+        fireStatcounterPixel();
+    } else {
+        window.addEventListener('load', fireStatcounterPixel, { once: true });
+    }
+
     function init () {
         loadState();
         commentaryPaused = false;
