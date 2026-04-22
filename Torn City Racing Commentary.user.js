@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.22.0
+// @version      2.23.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
 // @downloadURL  https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
+// @license      MIT
 // @match        https://www.torn.com/page.php?sid=racing*
 // @match        https://www.torn.com/page.php*sid=racing*
 // @grant        GM_getValue
@@ -18,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.22.0';
+    const SCRIPT_VERSION = '2.23.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -34,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v32';
+    const STORAGE_KEY = 'tc_racecomm_v33';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
