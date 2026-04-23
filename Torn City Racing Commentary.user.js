@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.24.0
+// @version      2.25.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.24.0';
+    const SCRIPT_VERSION = '2.25.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v34';
+    const STORAGE_KEY = 'tc_racecomm_v35';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -644,26 +644,42 @@
         });
     }
 
-    // Detect when another racer disappears from the active list mid-race.
-    // In Torn's racing, crashed racers are removed from the driver list while
-    // the race continues. If they weren't among the finishers either, they
-    // crashed out. We fire the 4-line "other crash" sequence.
-    function detectOtherCrashes (prevRacers, newRacers) {
+    // Detect other players who have crashed by scraping Torn's own crash markers.
+    // When a racer crashes, their <li> row gets a child <div class="status crash">
+    // indicator. Their name is in a span (typically with a name-related class)
+    // inside the same <li>. This is more reliable than tracking racer disappearance
+    // because it uses Torn's explicit UI signal rather than indirect inference.
+    function detectOtherCrashes () {
         if (state.status !== S.RACING) return;
-        if (!prevRacers.length || !newRacers.length) return;
-        const currentNames = new Set(newRacers.map(function (r) { return r.name; }));
-        prevRacers.forEach(function (r) {
-            if (!r.name || r.name === state.playerName) return;
-            if (currentNames.has(r.name)) return;
-            if (knownFinishers.has(r.name)) return;
-            if (otherCrashedNames.has(r.name)) return;
-            // Also guard against false positives when name scrape had a glitch —
-            // the racer count total from Position: X/Y should have gone down too.
-            // We don't have the previous racerCount cached separately, but the
-            // disappearance itself is the primary signal.
-            otherCrashedNames.add(r.name);
-            fireOtherCrashSequence(r.name);
+        // Find every explicit crash status marker on the page
+        const crashEls = document.querySelectorAll('div.status.crash, div[class*="status"][class*="crash"]');
+        crashEls.forEach(function (crashEl) {
+            // Walk up to the enclosing <li>
+            let li = crashEl.closest('li');
+            if (!li) return;
+            // Try multiple selectors to find the name span inside the <li>
+            let nameEl = li.querySelector('span.name, span[class*="name"], li.name, li[class*="name"] span, [class*="name"]');
+            // If no explicit name span, fall back to <a> text or li text
+            let name = '';
+            if (nameEl) name = (nameEl.textContent || '').trim();
+            if (!name) {
+                const a = li.querySelector('a');
+                if (a) name = (a.textContent || '').trim();
+            }
+            if (!name || name.length < 2 || name.length > 40) return;
+            if (name === state.playerName) return;
+            if (knownFinishers.has(name)) return;
+            if (otherCrashedNames.has(name)) return;
+            otherCrashedNames.add(name);
+            fireOtherCrashSequence(name);
         });
+    }
+
+    // Filter out crashed racers from any active racer list used for commentary.
+    // Spec: "disregard them from the commentary, do not use their name again."
+    function excludeCrashed (racers) {
+        if (!otherCrashedNames.size) return racers;
+        return racers.filter(function (r) { return !otherCrashedNames.has(r.name); });
     }
 
     // ─── Status transition ────────────────────────────────────────────────────────
@@ -1020,8 +1036,15 @@
                 }
             } else {
                 checkNewRacers();
-                // Detect when a non-player racer vanishes from the active list mid-race.
-                detectOtherCrashes(prevRacersSnapshot, newRacers);
+                // Scrape Torn's explicit crash markers each poll
+                detectOtherCrashes();
+            }
+            // Filter out crashed racers from the active commentary list.
+            // They still exist in the DOM briefly but should be ignored entirely
+            // in all future commentary per the spec.
+            if (otherCrashedNames.size) {
+                state.racers = excludeCrashed(state.racers);
+                state.prevRacers = excludeCrashed(state.prevRacers);
             }
         }
 
@@ -1045,6 +1068,15 @@
         }
 
         if (state.status === S.ENDED) processFinishers(scrapeFinishers());
+
+        // Scrape Torn's .status.crash DOM markers unconditionally each poll —
+        // catches crashes even if newRacers was briefly empty this tick.
+        if (state.status === S.RACING) {
+            detectOtherCrashes();
+            if (otherCrashedNames.size) {
+                state.racers = excludeCrashed(state.racers);
+            }
+        }
 
         fireCommentary(state.status);
         renderInfoBar();
