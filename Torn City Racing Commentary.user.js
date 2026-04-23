@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.23.0
+// @version      2.24.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.23.0';
+    const SCRIPT_VERSION = '2.24.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v33';
+    const STORAGE_KEY = 'tc_racecomm_v34';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -267,6 +267,9 @@
     let feedLines = [];
     let knownFinishers = new Set();
     let knownRacerNames = new Set();
+    // Racers we have already announced as crashed — prevents repeat messages
+    // for the same player. Reset on every new race entry.
+    let otherCrashedNames = new Set();
     let currentStatus = S.MENU;
     let clearedForStatus = null;
     let isMinimised = false;
@@ -627,6 +630,42 @@
         });
     }
 
+    // Fire the sequence for when ANOTHER racer crashes (not the player).
+    // The race continues, so status stays in RACING — just the feed shows the events.
+    function fireOtherCrashSequence (crashedName) {
+        const msgs = [
+            'There has been a crash!',
+            crashedName + ' has come into contact with something!',
+            'We are getting reports in, car in flames, wreckage everywhere!',
+            crashedName + ' has been removed from the car and rushed to hospital!'
+        ];
+        [0, 2500, 5000, 8500].forEach(function (d, i) {
+            setTimeout(function () { pushLine(msgs[i], 'crash'); }, d);
+        });
+    }
+
+    // Detect when another racer disappears from the active list mid-race.
+    // In Torn's racing, crashed racers are removed from the driver list while
+    // the race continues. If they weren't among the finishers either, they
+    // crashed out. We fire the 4-line "other crash" sequence.
+    function detectOtherCrashes (prevRacers, newRacers) {
+        if (state.status !== S.RACING) return;
+        if (!prevRacers.length || !newRacers.length) return;
+        const currentNames = new Set(newRacers.map(function (r) { return r.name; }));
+        prevRacers.forEach(function (r) {
+            if (!r.name || r.name === state.playerName) return;
+            if (currentNames.has(r.name)) return;
+            if (knownFinishers.has(r.name)) return;
+            if (otherCrashedNames.has(r.name)) return;
+            // Also guard against false positives when name scrape had a glitch —
+            // the racer count total from Position: X/Y should have gone down too.
+            // We don't have the previous racerCount cached separately, but the
+            // disappearance itself is the primary signal.
+            otherCrashedNames.add(r.name);
+            fireOtherCrashSequence(r.name);
+        });
+    }
+
     // ─── Status transition ────────────────────────────────────────────────────────
     const CLEAR_ON_ENTRY = [S.COUNTDOWN, S.PRE_LAUNCH, S.RACING];
 
@@ -647,6 +686,7 @@
                 state.preLaunchMsgCount = 0;
                 knownFinishers.clear();
                 knownRacerNames.clear();
+                otherCrashedNames.clear();
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -963,7 +1003,8 @@
         // scrapeRacers() uses broad DOM selectors and can overcount.
 
         if (newRacers.length) {
-            state.prevRacers = state.racers.slice();
+            const prevRacersSnapshot = state.racers.slice();
+            state.prevRacers = prevRacersSnapshot;
             state.racers = newRacers;
             if (restoredIntoRacing) {
                 // Refreshed during a race — add all current racers to known set silently
@@ -979,6 +1020,8 @@
                 }
             } else {
                 checkNewRacers();
+                // Detect when a non-player racer vanishes from the active list mid-race.
+                detectOtherCrashes(prevRacersSnapshot, newRacers);
             }
         }
 
