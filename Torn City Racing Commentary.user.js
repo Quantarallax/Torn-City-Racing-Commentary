@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.25.0
+// @version      2.26.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.25.0';
+    const SCRIPT_VERSION = '2.26.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v35';
+    const STORAGE_KEY = 'tc_racecomm_v36';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -313,6 +313,11 @@
             };
             (state.finishers).forEach(function (f) { knownFinishers.add(f.name); });
             (state.racers).forEach(function (r) { knownRacerNames.add(r.name); });
+            // Restore already-announced crash names so we don't replay them on refresh.
+            // Any NEW crash marker found by detectOtherCrashes() after load will still fire.
+            if (Array.isArray(p.otherCrashedNames)) {
+                p.otherCrashedNames.forEach(function (n) { otherCrashedNames.add(n); });
+            }
             currentStatus = state.status;
             clearedForStatus = state.status;
             // Flag refresh during RACING so we show a summary instead of join messages
@@ -339,7 +344,10 @@
                 halfwayFired: state.halfwayFired,
                 preLaunchMsgCount: state.preLaunchMsgCount,
                 feedLines: feedLines.slice(-MAX_FEED),
-                recentByType
+                recentByType,
+                // Persist announced crash names so we don't re-announce them
+                // after a page refresh during the same race.
+                otherCrashedNames: Array.from(otherCrashedNames)
             }));
         } catch (_) {}
     }
