@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.27.0
+// @version      2.29.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.27.0';
+    const SCRIPT_VERSION = '2.29.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v37';
+    const STORAGE_KEY = 'tc_racecomm_v39';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -227,6 +227,12 @@
         track: '—',
         car: '—',
         position: '—',
+        // When the user clicks another racer in Torn's race list, their name goes
+        // here. The display (NAME/CAR/POS) then tracks that racer until focus is
+        // cleared. Empty string / null means no focus override — show real player.
+        focusedName: '',
+        focusedCar: '',
+        focusedPosition: '',
         // *** TWO-RACER GUARD FIX ***
         // racerCount is ONLY ever set from Position: X/Y scrape (posData.total).
         // It is NEVER updated from scrapeRacers().length, which uses broad DOM
@@ -293,6 +299,9 @@
             state.track = p.track || '—';
             state.car = p.car || '—';
             state.position = p.position || '—';
+            state.focusedName = p.focusedName || '';
+            state.focusedCar = p.focusedCar || '';
+            state.focusedPosition = p.focusedPosition || '';
             state.racerCount = p.racerCount || 0;
             state.racers = p.racers || [];
             state.prevRacers = p.racers || [];
@@ -333,6 +342,9 @@
                 track: state.track,
                 car: state.car,
                 position: state.position,
+                focusedName: state.focusedName,
+                focusedCar: state.focusedCar,
+                focusedPosition: state.focusedPosition,
                 racerCount: state.racerCount,
                 racers: state.racers,
                 finishers: state.finishers,
@@ -945,6 +957,56 @@
         return m ? m[1].trim() : null;
     }
 
+    // Helper: extract the Torn user ID from any element inside a racer row.
+    // Searches for an <a href="/profiles.php?XID=12345"> link, data-id, data-user-id,
+    // or similar attributes. Returns a numeric string, or empty if none found.
+    function extractUserId (container) {
+        if (!container) return '';
+        // Try anchor hrefs first (most reliable)
+        const anchors = container.querySelectorAll('a[href]');
+        for (let i = 0; i < anchors.length; i++) {
+            const href = anchors[i].getAttribute('href') || '';
+            const m = href.match(/XID=(\d+)/i) || href.match(/profiles\.php\?.*?ID=(\d+)/i) ||
+                      href.match(/\/profile[s]?\/(\d+)/i);
+            if (m) return m[1];
+        }
+        // Fall back to data attributes on the container or its children
+        const withData = container.matches && container.matches('[data-id],[data-user-id],[data-userid]')
+            ? container
+            : container.querySelector('[data-id],[data-user-id],[data-userid]');
+        if (withData) {
+            const id = withData.getAttribute('data-id') ||
+                       withData.getAttribute('data-user-id') ||
+                       withData.getAttribute('data-userid') || '';
+            if (/^\d+$/.test(id)) return id;
+        }
+        return '';
+    }
+
+    // Is this driver row currently the "focused" one — i.e. the user clicked
+    // on this racer in Torn's list. Torn typically adds an active/expanded/selected
+    // class to the row (and/or shows an expanded sub-panel).
+    function isRowFocused (row) {
+        if (!row) return false;
+        const cls = (row.className && typeof row.className === 'string') ? row.className : '';
+        if (/\b(active|focused|selected|expanded|current|open)\b/i.test(cls)) return true;
+        // Also check if the row has an expanded child panel visible
+        const expanded = row.querySelector('[class*="active"], [class*="expanded"], [class*="selected"]');
+        return !!expanded;
+    }
+
+    // Try to read the car name from a racer row's expanded panel. Torn's layout
+    // shows car info inside the row when expanded, often with "car" in the class.
+    function extractCarFromRow (row) {
+        if (!row) return '';
+        const carEl = row.querySelector('[class*="car"][class*="name"], [class*="carName"], [class*="vehicle"]');
+        if (carEl) {
+            const t = (carEl.textContent || '').trim();
+            if (t && t.length > 1 && t.length < 50) return t;
+        }
+        return '';
+    }
+
     function scrapeRacers () {
         // This returns names and positions for leaderboard display and movement detection.
         // Its .length is NOT used for racerCount — use scrapePosition().total for that.
@@ -956,7 +1018,14 @@
             const name = nameEl ? nameEl.textContent.trim() : '';
             const posNum = parseInt(posEl ? posEl.textContent.trim() : '', 10) || idx + 1;
             if (name && name.length > 1 && name.length < 40) {
-                racers.push({ name: name, pos: String(posNum), posNum: posNum });
+                racers.push({
+                    name: name,
+                    pos: String(posNum),
+                    posNum: posNum,
+                    userId: extractUserId(ul),
+                    focused: isRowFocused(ul),
+                    car: extractCarFromRow(ul)
+                });
             }
         });
         if (!racers.length) {
@@ -970,7 +1039,14 @@
                 const name = nameEl ? nameEl.textContent.trim() : '';
                 const pos = posEl ? posEl.textContent.trim() : '';
                 if (name && name.length > 1 && name.length < 40) {
-                    racers.push({ name: name, pos: pos || '?', posNum: parseInt(pos, 10) || 0 });
+                    racers.push({
+                        name: name,
+                        pos: pos || '?',
+                        posNum: parseInt(pos, 10) || 0,
+                        userId: extractUserId(row),
+                        focused: isRowFocused(row),
+                        car: extractCarFromRow(row)
+                    });
                 }
             });
         }
@@ -978,7 +1054,12 @@
             const rx = /(\d+)\.\s+([A-Za-z0-9_\-]+)/g;
             let rm;
             while ((rm = rx.exec(getPageText())) !== null) {
-                if (parseInt(rm[1], 10) <= 100) racers.push({ name: rm[2], pos: rm[1], posNum: parseInt(rm[1], 10) });
+                if (parseInt(rm[1], 10) <= 100) {
+                    racers.push({
+                        name: rm[2], pos: rm[1], posNum: parseInt(rm[1], 10),
+                        userId: '', focused: false, car: ''
+                    });
+                }
             }
         }
         racers.sort(function (a, b) { return a.posNum - b.posNum; });
@@ -1067,6 +1148,21 @@
         // scrapeRacers() uses broad DOM selectors and can overcount.
 
         if (newRacers.length) {
+            // Check if the user has clicked another racer in Torn's list.
+            // If so, update focus state so the NAME/CAR/POS display follows them.
+            const focused = newRacers.find(function (r) { return r.focused; });
+            if (focused && focused.name && focused.name !== state.playerName) {
+                state.focusedName = focused.name;
+                // Update car at the same time per spec
+                if (focused.car) state.focusedCar = focused.car;
+                state.focusedPosition = String(focused.posNum || '');
+            } else if (!focused) {
+                // No racer row is marked focused — clear the override so the
+                // display reverts to the real player.
+                state.focusedName = '';
+                state.focusedCar = '';
+                state.focusedPosition = '';
+            }
             const prevRacersSnapshot = state.racers.slice();
             state.prevRacers = prevRacersSnapshot;
             state.racers = newRacers;
@@ -1138,11 +1234,24 @@
     // ─── Render ───────────────────────────────────────────────────────────────────
     function renderInfoBar () {
         const sv = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
-        sv('tc-ib-name', state.playerName);
+        // If a racer is focused (user clicked their name in Torn's list),
+        // show that racer's name/car/pos instead of the real player's.
+        const focusActive = !!(state.focusedName && state.focusedName !== '—');
+        const displayName = focusActive ? state.focusedName : state.playerName;
+        const displayCar = focusActive && state.focusedCar ? state.focusedCar : state.car;
+        const displayPos = focusActive && state.focusedPosition
+            ? state.focusedPosition
+            : state.position;
+        sv('tc-ib-name', displayName);
         sv('tc-ib-track', state.track);
-        sv('tc-ib-car', state.car);
-        const posNum = parseInt(state.position, 10);
+        sv('tc-ib-car', displayCar);
+        const posNum = parseInt(displayPos, 10);
         sv('tc-ib-pos', posNum >= 1 ? ordinal(posNum) : '—');
+        // Visual cue: a subtle marker next to the driver label when focus is on another racer.
+        const driverLabel = document.getElementById('tc-ib-name');
+        if (driverLabel) {
+            driverLabel.classList.toggle('tc-focus-other', focusActive);
+        }
     }
 
     function renderStatus () {
@@ -1172,11 +1281,11 @@
             const pn = r.posNum || i + 1;
             const isMe = r.name === state.playerName;
             const posClass = pn === 1 ? 'lb-p1' : pn === 2 ? 'lb-p2' : 'lb-p3';
-            const url = 'https://www.torn.com/profiles.php?XID=' + encodeURIComponent(r.name);
+            // Per spec: leaderboard player names are NOT hyperlinked.
             return '<div class="tc-lb-row' + (isMe ? ' lb-me' : '') + '">'
                 + '<span class="tc-lb-pos ' + posClass + '">' + ordinal(pn) + '</span>'
                 + (TROPHY[pn] || '')
-                + '<a class="tc-lb-name tc-link" href="' + url + '" target="_blank" rel="noopener">' + escH(r.name) + '</a>'
+                + '<span class="tc-lb-name">' + escH(r.name) + '</span>'
                 + '</div>';
         }).join('');
     }
@@ -1264,6 +1373,7 @@
 .tc-ib-sep{width:1px;background:var(--c-border2);margin:4px 0;flex-shrink:0;}
 .tc-ib-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;margin-bottom:2px;white-space:nowrap;}
 .tc-ib-val{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--c-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.tc-ib-val.tc-focus-other{color:var(--c-blue);}
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
