@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.30.0
+// @version      2.36.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.30.0';
+    const SCRIPT_VERSION = '2.36.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v40';
+    const STORAGE_KEY = 'tc_racecomm_v46';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -267,6 +267,12 @@
     let tWaiting = 0;
     let tPosCooldown = 0;
 
+    // For large-grid throttling: counts non-ambient racing messages so we can
+    // show only every 10th when there are more than 20 drivers. Session-only.
+    const BIG_RACE_THRESHOLD = 20;
+    const BIG_RACE_SHOW_EVERY = 20;
+    let nonAmbientRaceCounter = 0;
+
     let recentByType = {
         ambient: [], player: [], position: [],
         moverUp: [], moverDown: [],
@@ -472,6 +478,11 @@
         const el = getFeedEl();
         if (!el) return;
         const node = makeFeedNode(text, type, icon || '');
+        // Per spec: colour new commentary in white, with a .25s fade to normal.
+        // Applies only to genuinely new messages — NOT when the feed is rebuilt
+        // from persisted history (rebuildFeed does not call this function).
+        node.classList.add('tc-fl-new');
+        setTimeout(function () { node.classList.remove('tc-fl-new'); }, 250);
         if (state.scrollDirection === 'up') {
             // Newest at top: insert at the start, trim from the end
             const nearTop = el.scrollTop < 80;
@@ -535,7 +546,13 @@
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
                     } else if (currentStatus === S.PRE_LAUNCH) {
-                        pushLine(r.name + ' just joined in position ' + posStr + '.', 'status', ICON.join);
+                        // Rotate between two pre-launch arrival lines
+                        const preLaunchLines = [
+                            r.name + ' just joined in position ' + posStr + '.',
+                            r.name + ' does a last minute check.'
+                        ];
+                        const choice = preLaunchLines[Math.floor(Math.random() * preLaunchLines.length)];
+                        pushLine(choice, 'status', ICON.join);
                     }
                 }
             }
@@ -557,6 +574,18 @@
     }
 
     // ─── Commentary ───────────────────────────────────────────────────────────────
+    // Big-grid throttling: in RACING with more than 20 drivers, only show every
+    // 10th non-ambient message (position calls, player-specific, proximity,
+    // movement calls). Ambient lines and funny lines always show — they're the
+    // atmospheric colour commentary and set the pace. Returns true if the
+    // non-ambient message should be shown, false to suppress it.
+    function bigRaceShouldShow () {
+        if (state.status !== S.RACING) return true;
+        if ((state.racerCount || 0) <= BIG_RACE_THRESHOLD) return true;
+        nonAmbientRaceCounter++;
+        return (nonAmbientRaceCounter % BIG_RACE_SHOW_EVERY) === 1;
+    }
+
     function fireCommentary (st) {
         const now = Date.now();
 
@@ -596,18 +625,22 @@
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
             }
             if (now >= tPlayer) {
-                pushLine(fill(pickLine(LINES.RACING.player, 'player')), 'player');
+                if (bigRaceShouldShow()) {
+                    pushLine(fill(pickLine(LINES.RACING.player, 'player')), 'player');
+                }
                 tPlayer = now + PLAYER_GAP + Math.random() * 8000;
             }
             // Position calls — gated by cooldown; pool selection uses authoritative racerCount
             if (now >= tPosition && now >= tPosCooldown && state.racers.length >= 2) {
-                if (isThreePlusRace()) {
-                    // 3+ racers confirmed from Position: X/Y — safe to use position3 lines
-                    const pool = LINES.RACING.position3.concat(LINES.RACING.position2);
-                    pushLine(fill(pickLine(pool, 'position')), 'position');
-                } else {
-                    // 2 racers or unknown — only use 2-player-safe lines
-                    pushLine(fill(pickLine(LINES.RACING.position2, 'position')), 'position');
+                if (bigRaceShouldShow()) {
+                    if (isThreePlusRace()) {
+                        // 3+ racers confirmed from Position: X/Y — safe to use position3 lines
+                        const pool = LINES.RACING.position3.concat(LINES.RACING.position2);
+                        pushLine(fill(pickLine(pool, 'position')), 'position');
+                    } else {
+                        // 2 racers or unknown — only use 2-player-safe lines
+                        pushLine(fill(pickLine(LINES.RACING.position2, 'position')), 'position');
+                    }
                 }
                 tPosition = now + POSITION_GAP + Math.random() * 5000;
             }
@@ -617,10 +650,12 @@
                 const r1 = state.racers[idx];
                 const r2 = state.racers[idx + 1];
                 if (r1 && r2) {
-                    pushLine(
-                        fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: r1.name, p2name: r2.name }),
-                        'position', ICON.proximity
-                    );
+                    if (bigRaceShouldShow()) {
+                        pushLine(
+                            fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: r1.name, p2name: r2.name }),
+                            'position', ICON.proximity
+                        );
+                    }
                     tProximity = now + PROXIMITY_GAP + Math.random() * 8000;
                 }
             }
@@ -653,7 +688,10 @@
             const text = fill(pickLine(LINES.RACING.moverUp, 'moverUp'), {
                 mover: item.r.name, moverFrom: ordinal(item.prev), moverTo: ordinal(item.r.posNum)
             });
-            pushLine(text, isPlayer ? 'player' : 'position', ICON.up);
+            // Always show the player's own gains and leader changes; throttle others in big races.
+            if (isPlayer || item.isLeader || bigRaceShouldShow()) {
+                pushLine(text, isPlayer ? 'player' : 'position', ICON.up);
+            }
             if (item.isLeader) tPosCooldown = Date.now() + POSITION_COOLDOWN;
         });
         losses.forEach(function (item) {
@@ -667,7 +705,10 @@
             const text = fill(pickLine(pool, key), {
                 faller: item.r.name, fallerFrom: ordinal(item.prev), fallerTo: ordinal(item.r.posNum)
             });
-            pushLine(text, isPlayer ? 'player' : 'position', ICON.down);
+            // Always show the player's own losses and leader changes; throttle others in big races.
+            if (isPlayer || item.isLeader || bigRaceShouldShow()) {
+                pushLine(text, isPlayer ? 'player' : 'position', ICON.down);
+            }
             if (item.isLeader) tPosCooldown = Date.now() + POSITION_COOLDOWN;
         });
     }
@@ -798,6 +839,7 @@
                 knownFinishers.clear();
                 knownRacerNames.clear();
                 otherCrashedNames.clear();
+                nonAmbientRaceCounter = 0;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -811,36 +853,47 @@
         }
         if (newSt === S.PRE_LAUNCH) state.preLaunchMsgCount = 0;
 
-        if (newSt === S.COUNTDOWN) {
-            // Do NOT show paddock/join messages if we're restoring from a RACING save.
-            // The page may briefly detect COUNTDOWN before settling on RACING; these
-            // messages would be wrong (the race has already started).
-            if (!restoredIntoRacing) {
-                const others = racersBeforeClear.filter(function (r) { return r.name !== state.playerName; });
-                if (others.length > 0) {
-                    const n = others.length;
-                    pushLine(
-                        'There ' + (n === 1 ? 'is' : 'are') + ' ' + n + ' player' + (n === 1 ? '' : 's') + ' already in the paddock.',
-                        'status'
-                    );
-                }
-                // Only show the join message when we have a real name and position.
-                // If either is still '—' the scrape hasn't resolved yet and the
-                // message would show "— has joined" or "Position has joined" etc.
-                const validName = state.playerName !== '—' && state.playerName !== '';
-                const validPos = parseInt(state.position, 10) >= 1;
-                if (validName && validPos) {
-                    pushLine(fill('{player} has joined the track in {pos}.'), 'status', ICON.join);
-                }
+        // Per spec: when joining a race at any entry status (COUNTDOWN,
+        // PRE-LAUNCH, or WAITING), announce existing racers and the player's
+        // entry position using the new wording.
+        function fireEntryMessages () {
+            if (restoredIntoRacing) return;
+            const others = racersBeforeClear.filter(function (r) { return r.name !== state.playerName; });
+            if (others.length > 0) {
+                const n = others.length;
+                pushLine(
+                    'There ' + (n === 1 ? 'is' : 'are') + ' ' + n + ' racer' + (n === 1 ? '' : 's') + ' already on the track.',
+                    'status'
+                );
+            }
+            // Only show the join message when we have a real name and position.
+            const validName = state.playerName !== '—' && state.playerName !== '';
+            const validPos = parseInt(state.position, 10) >= 1;
+            if (validName && validPos) {
+                pushLine(fill('{player} rolls onto the track in {pos}.'), 'status', ICON.join);
             }
         }
+
+        if (newSt === S.COUNTDOWN) {
+            fireEntryMessages();
+        }
         if (newSt === S.PRE_LAUNCH && oldSt !== S.PRE_LAUNCH) {
+            // Only announce an entry if we came from MENU/unknown — not from COUNTDOWN,
+            // where the entry was already announced.
+            if (oldSt === S.MENU || oldSt === S.ENDED || oldSt === S.CRASHED || !oldSt) {
+                fireEntryMessages();
+            }
             pushLine('Engines are revving — not long until launch.', 'status', ICON.prelaunch);
             if (oldSt === S.COUNTDOWN) {
                 pushLine('We are now in Pre-Launch.', 'status', ICON.prelaunch);
             }
         }
         if (newSt === S.WAITING) {
+            // Fire entry messages if we're coming into WAITING from the menu
+            // (i.e. the player joined a race that doesn't have enough drivers yet)
+            if (oldSt === S.MENU || oldSt === S.ENDED || oldSt === S.CRASHED || !oldSt) {
+                fireEntryMessages();
+            }
             pushLine('Not enough drivers to start this race. Waiting\u2026', 'waiting', ICON.wait);
         }
         if (newSt === S.RACING) {
@@ -1310,16 +1363,20 @@
         const el = document.getElementById('tc-rc-lb-list');
         if (!el) return;
         if (state.status === S.MENU) { el.innerHTML = '<div class="tc-lb-empty">Select a race\u2026</div>'; return; }
-        const top3 = state.racers.slice(0, 3);
-        if (!top3.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
-        el.innerHTML = top3.map(function (r, i) {
+        const top6 = state.racers.slice(0, 6);
+        if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
+        el.innerHTML = top6.map(function (r, i) {
             const pn = r.posNum || i + 1;
             const isMe = r.name === state.playerName;
-            const posClass = pn === 1 ? 'lb-p1' : pn === 2 ? 'lb-p2' : 'lb-p3';
+            // Gold/silver/bronze for positions 1-3, muted styling for 4-6.
+            let posClass = 'lb-px';
+            if (pn === 1) posClass = 'lb-p1';
+            else if (pn === 2) posClass = 'lb-p2';
+            else if (pn === 3) posClass = 'lb-p3';
             // Per spec: leaderboard player names are NOT hyperlinked.
-            return '<div class="tc-lb-row' + (isMe ? ' lb-me' : '') + '">'
+            return '<div class="tc-lb-row' + (isMe ? ' lb-me' : '') + (pn > 3 ? ' lb-lower' : '') + '">'
                 + '<span class="tc-lb-pos ' + posClass + '">' + ordinal(pn) + '</span>'
-                + (TROPHY[pn] || '')
+                + (TROPHY[pn] || '<span class="tc-lb-spacer"></span>')
                 + '<span class="tc-lb-name">' + escH(r.name) + '</span>'
                 + '</div>';
         }).join('');
@@ -1334,12 +1391,12 @@
 
     function updateScrollDirBtn () {
         const btn = document.getElementById('tc-btn-scroll-dir');
-        if (!btn) return;
-        if (state.scrollDirection === 'up') {
-            btn.innerHTML = '\u2191 Up';
-        } else {
-            btn.innerHTML = '\u2193 Down';
-        }
+        const arrow = document.getElementById('tc-col-hdr-arrow');
+        const isUp = state.scrollDirection === 'up';
+        if (btn) btn.innerHTML = isUp ? '\u2191 Up' : '\u2193 Down';
+        // Also reflect the direction in the COMMENTARY column header so the user
+        // always sees an indicator of which way the feed grows.
+        if (arrow) arrow.innerHTML = isUp ? '&#8593;' : '&#8595;';
     }
 
     function updatePauseBtn () {
@@ -1439,6 +1496,11 @@
 .tc-lb-row.lb-me{background:rgba(245,192,48,.09);border-left:2px solid var(--c-gold);}
 .tc-lb-pos{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-muted);min-width:20px;flex-shrink:0;}
 .lb-p1{color:#ffd040;}.lb-p2{color:#d0dce8;}.lb-p3{color:#e8a050;}
+.lb-px{color:var(--c-muted);}
+.tc-lb-row.lb-lower{font-size:11px;padding:3px 6px;}
+.tc-lb-row.lb-lower .tc-lb-pos{font-size:8px;}
+.tc-lb-row.lb-lower .tc-lb-name{color:var(--c-muted);font-weight:500;}
+.tc-lb-spacer{display:inline-block;width:14px;flex-shrink:0;}
 .tc-trophy{font-size:14px;flex-shrink:0;line-height:1;}
 .tp-gold{filter:drop-shadow(0 0 4px rgba(255,208,64,.8));}.tp-silver{filter:drop-shadow(0 0 4px rgba(208,220,232,.7));}.tp-bronze{filter:drop-shadow(0 0 4px rgba(232,160,80,.7));}
 .tc-lb-name{color:var(--c-mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
@@ -1447,9 +1509,11 @@ a.tc-link{color:inherit;text-decoration:none;transition:color .15s;}
 a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 #tc-rc-feed-col{position:absolute;top:0;left:143px;right:0;bottom:0;display:flex;flex-direction:column;overflow:hidden;}
 .tc-col-hdr{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;padding:5px 8px 4px;border-bottom:1px solid var(--c-border2);flex-shrink:0;white-space:nowrap;}
+#tc-col-hdr-arrow{color:var(--c-gold);margin-left:4px;font-size:9px;letter-spacing:0;}
 #tc-feed-inner{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:10px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
-.tc-fl{display:flex;align-items:flex-start;gap:5px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:400;line-height:1.5;padding:3px 10px;border-left:2px solid transparent;color:var(--c-muted);word-break:break-word;flex-shrink:0;width:100%;box-sizing:border-box;}
-.tc-fl-text{flex:1;min-width:0;}
+.tc-fl{display:flex;align-items:flex-start;gap:5px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:400;line-height:1.5;padding:3px 10px;border-left:2px solid transparent;color:var(--c-muted);word-break:break-word;flex-shrink:0;width:100%;box-sizing:border-box;transition:color .25s linear;}
+.tc-fl.tc-fl-new,.tc-fl.tc-fl-new .tc-fl-text{color:#ffffff !important;transition:none;}
+.tc-fl-text{flex:1;min-width:0;transition:color .25s linear;}
 .tc-icon{flex-shrink:0;display:inline-flex;align-items:center;margin-top:2px;}
 .fl-status{color:var(--c-white);font-weight:700;font-size:13.5px;border-left-color:var(--c-gold);background:rgba(245,192,48,.07);padding-top:4px;padding-bottom:4px;margin:1px 0;}
 .fl-ambient{color:var(--c-dim);font-style:italic;}
@@ -1465,12 +1529,12 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 .tc-foot-btn.tc-btn-active{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
 #tc-live-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--c-green);flex-shrink:0;animation:tc-pulse 2.5s ease-in-out infinite;}
 @keyframes tc-pulse{0%,100%{opacity:1;}50%{opacity:.15;}}
-#tc-rc-credits{display:none;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px 16px;text-align:center;flex:1;}
-#tc-rc-settings{display:none;flex-direction:column;align-items:stretch;gap:10px;padding:20px 18px;flex:1;}
-.tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;}
-.tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;}
+#tc-rc-settings{display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;padding:20px 18px;flex:1;overflow-y:auto;}
+.tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;width:100%;}
+.tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;width:100%;box-sizing:border-box;}
+.tc-set-divider{width:100%;height:1px;background:var(--c-border2);margin:14px 0 6px;}
 .tc-set-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:600;color:var(--c-mid);letter-spacing:.04em;}
-.tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;}
+.tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;width:100%;text-align:left;}
 .tc-cred-flag{font-size:36px;line-height:1;}
 .tc-cred-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;line-height:1.3;}
 .tc-cred-ver{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--c-dim);letter-spacing:.08em;}
@@ -1501,7 +1565,6 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
   <span class="tc-title-text">&#127937; ${escH(SCRIPT_NAME)}</span>
   <div class="tc-hdr-btns">
     <button id="tc-rc-min" title="Minimise">&#9650;</button>
-    <button id="tc-rc-close" title="Close">&#10005;</button>
   </div>
 </div>
 <div id="tc-rc-body">
@@ -1521,7 +1584,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     </div>
     <div id="tc-rc-cols">
       <div id="tc-rc-lb-col">
-        <div class="tc-col-hdr">TOP 3</div>
+        <div class="tc-col-hdr">TOP 6</div>
         <div id="tc-rc-lb-list"></div>
         <div id="tc-rc-stats">
           <div class="tc-stats-row1">
@@ -1535,21 +1598,19 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         </div>
       </div>
       <div id="tc-rc-feed-col">
-        <div class="tc-col-hdr">COMMENTARY</div>
+        <div class="tc-col-hdr" id="tc-col-hdr-commentary">COMMENTARY <span id="tc-col-hdr-arrow">&#8595;</span></div>
         <div id="tc-feed-inner"></div>
       </div>
     </div>
   </div>
-  <div id="tc-rc-credits">
+  <div id="tc-rc-settings">
     <div class="tc-cred-flag">&#127937;</div>
     <div class="tc-cred-title">${escH(SCRIPT_NAME)}</div>
     <div class="tc-cred-ver">Version ${escH(SCRIPT_VERSION)}</div>
     <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
     <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
     <div class="tc-cred-msg">Bugs &amp; feedback welcome!<br>Find me in-game on Torn City.</div>
-  </div>
-  <div id="tc-rc-settings">
-    <div class="tc-set-title">Settings</div>
+    <div class="tc-set-divider"></div>
     <div class="tc-set-row">
       <span class="tc-set-lbl">Commentary scroll</span>
       <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8595; Down</button>
@@ -1561,7 +1622,6 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
   </div>
 </div>
 <div id="tc-rc-footer">
-  <button id="tc-btn-credits" class="tc-foot-btn">Credits</button>
   <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
   <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
   <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
@@ -1571,36 +1631,24 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         document.body.appendChild(hud);
         makeDraggable(hud, document.getElementById('tc-rc-drag'));
         document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
-        document.getElementById('tc-rc-close').addEventListener('click', function () { hud.remove(); });
-        document.getElementById('tc-btn-credits').addEventListener('click', function () {
-            document.getElementById('tc-rc-main').style.display = 'none';
-            document.getElementById('tc-rc-credits').style.display = 'flex';
-            document.getElementById('tc-rc-settings').style.display = 'none';
-            document.getElementById('tc-btn-credits').style.display = 'none';
-            document.getElementById('tc-btn-settings').style.display = 'none';
-            document.getElementById('tc-btn-back').style.display = '';
-        });
         document.getElementById('tc-btn-settings').addEventListener('click', function () {
             document.getElementById('tc-rc-main').style.display = 'none';
-            document.getElementById('tc-rc-credits').style.display = 'none';
             document.getElementById('tc-rc-settings').style.display = 'flex';
-            document.getElementById('tc-btn-credits').style.display = 'none';
             document.getElementById('tc-btn-settings').style.display = 'none';
             document.getElementById('tc-btn-back').style.display = '';
             updateScrollDirBtn();
         });
         document.getElementById('tc-btn-back').addEventListener('click', function () {
-            document.getElementById('tc-rc-credits').style.display = 'none';
             document.getElementById('tc-rc-settings').style.display = 'none';
             document.getElementById('tc-rc-main').style.display = '';
             document.getElementById('tc-btn-back').style.display = 'none';
-            document.getElementById('tc-btn-credits').style.display = '';
             document.getElementById('tc-btn-settings').style.display = '';
         });
         document.getElementById('tc-btn-scroll-dir').addEventListener('click', function () {
             state.scrollDirection = state.scrollDirection === 'up' ? 'down' : 'up';
+            // Per spec: when scroll direction changes, clear the commentary window.
+            clearFeed();
             updateScrollDirBtn();
-            rebuildFeed();
             saveState();
         });
         document.getElementById('tc-btn-pause').addEventListener('click', function () {
