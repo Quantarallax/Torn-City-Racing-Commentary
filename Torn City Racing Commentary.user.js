@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.26.0
+// @version      2.27.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.26.0';
+    const SCRIPT_VERSION = '2.27.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v36';
+    const STORAGE_KEY = 'tc_racecomm_v37';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -652,32 +652,72 @@
         });
     }
 
-    // Detect other players who have crashed by scraping Torn's own crash markers.
-    // When a racer crashes, their <li> row gets a child <div class="status crash">
-    // indicator. Their name is in a span (typically with a name-related class)
-    // inside the same <li>. This is more reliable than tracking racer disappearance
-    // because it uses Torn's explicit UI signal rather than indirect inference.
+    // Detect other players who have crashed by scraping Torn's crash UI markers.
+    // When a racer crashes, their driver <li> gets a "status crash" indicator
+    // somewhere inside (exact tag and class hashing can vary, so we cast wide).
+    // The player name lives in a span/a with a name-related class in the same <li>.
+    //
+    // Must also work on page refresh: any crash markers already in the DOM
+    // on load should be picked up and fired (unless already in otherCrashedNames
+    // from the persisted state).
     function detectOtherCrashes () {
-        if (state.status !== S.RACING) return;
-        // Find every explicit crash status marker on the page
-        const crashEls = document.querySelectorAll('div.status.crash, div[class*="status"][class*="crash"]');
-        crashEls.forEach(function (crashEl) {
-            // Walk up to the enclosing <li>
-            let li = crashEl.closest('li');
+        // Run during active RACING OR during the post-refresh restore bounce
+        // where the detected status may briefly flicker before settling.
+        if (state.status !== S.RACING && !restoredIntoRacing) return;
+
+        // Collect candidate crash markers via several selector strategies,
+        // covering Torn's possible class variations (plain "status crash",
+        // hashed module CSS like statusCrash___xyz, or crash-suffix patterns).
+        const selectors = [
+            '.status.crash',
+            '[class*="status"][class*="crash"]',
+            '[class*="statusCrash"]',
+            '[class*="crashed"]'
+        ];
+        const candidates = new Set();
+        selectors.forEach(function (sel) {
+            try {
+                document.querySelectorAll(sel).forEach(function (el) { candidates.add(el); });
+            } catch (_) {}
+        });
+
+        candidates.forEach(function (crashEl) {
+            // Walk up to the enclosing <li> (or the nearest driver row)
+            const li = crashEl.closest('li') ||
+                       crashEl.closest('[class*="driver"]') ||
+                       crashEl.closest('[class*="racer"]');
             if (!li) return;
-            // Try multiple selectors to find the name span inside the <li>
-            let nameEl = li.querySelector('span.name, span[class*="name"], li.name, li[class*="name"] span, [class*="name"]');
-            // If no explicit name span, fall back to <a> text or li text
+            // Skip: our own HUD must never be treated as Torn DOM
+            if (li.closest('#tc-rc-hud')) return;
+
+            // Extract the racer name from common patterns
             let name = '';
-            if (nameEl) name = (nameEl.textContent || '').trim();
-            if (!name) {
-                const a = li.querySelector('a');
-                if (a) name = (a.textContent || '').trim();
+            const nameSelectors = [
+                'span.name',
+                'span[class*="name"]',
+                'a[class*="name"]',
+                '[class*="name"] span',
+                'li.name',
+                'li[class*="name"]',
+                '[class*="name"]',
+                'a'
+            ];
+            for (let i = 0; i < nameSelectors.length && !name; i++) {
+                const el = li.querySelector(nameSelectors[i]);
+                if (el) {
+                    const t = (el.textContent || '').trim();
+                    // Skip obvious non-names (status text, numbers, etc.)
+                    if (t && t.length >= 2 && t.length <= 40 &&
+                        !/^\d+$/.test(t) && !/^(crash|crashed|status)/i.test(t)) {
+                        name = t;
+                    }
+                }
             }
-            if (!name || name.length < 2 || name.length > 40) return;
+            if (!name) return;
             if (name === state.playerName) return;
             if (knownFinishers.has(name)) return;
             if (otherCrashedNames.has(name)) return;
+
             otherCrashedNames.add(name);
             fireOtherCrashSequence(name);
         });
@@ -1078,8 +1118,9 @@
         if (state.status === S.ENDED) processFinishers(scrapeFinishers());
 
         // Scrape Torn's .status.crash DOM markers unconditionally each poll —
-        // catches crashes even if newRacers was briefly empty this tick.
-        if (state.status === S.RACING) {
+        // catches crashes even if newRacers was briefly empty this tick,
+        // and catches any crash already in the DOM after a page refresh.
+        if (state.status === S.RACING || restoredIntoRacing) {
             detectOtherCrashes();
             if (otherCrashedNames.size) {
                 state.racers = excludeCrashed(state.racers);
