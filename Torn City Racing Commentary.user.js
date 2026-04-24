@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.29.0
+// @version      2.30.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.29.0';
+    const SCRIPT_VERSION = '2.30.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v39';
+    const STORAGE_KEY = 'tc_racecomm_v40';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -247,6 +247,10 @@
         currentLap: '—',
         completion: '—',
         windowFixed: false,
+        // Commentary feed scroll direction:
+        // 'down' = newest at bottom, older scroll up off the top (default, matches classic log behaviour)
+        // 'up'   = newest at top, older scroll down off the bottom (reverse chronological)
+        scrollDirection: 'down',
         halfwayFired: false,
         preLaunchMsgCount: 0
     };
@@ -311,6 +315,8 @@
             state.currentLap = p.currentLap || '—';
             state.completion = p.completion || '—';
             state.windowFixed = p.windowFixed || false;
+            state.scrollDirection = (p.scrollDirection === 'up' || p.scrollDirection === 'down')
+                ? p.scrollDirection : 'down';
             state.halfwayFired = p.halfwayFired || false;
             state.preLaunchMsgCount = p.preLaunchMsgCount || 0;
             feedLines = p.feedLines || [];
@@ -353,6 +359,7 @@
                 currentLap: state.currentLap,
                 completion: state.completion,
                 windowFixed: state.windowFixed,
+                scrollDirection: state.scrollDirection,
                 halfwayFired: state.halfwayFired,
                 preLaunchMsgCount: state.preLaunchMsgCount,
                 feedLines: feedLines.slice(-MAX_FEED),
@@ -444,28 +451,56 @@
 
     function getFeedEl () { return document.getElementById('tc-feed-inner'); }
 
-    function scrollToBottom () {
+    // In 'down' mode newest entries are at the bottom — auto-scroll keeps bottom visible.
+    // In 'up' mode newest entries are at the top — auto-scroll keeps top visible.
+    function scrollToEdge () {
         requestAnimationFrame(function () {
             const el = getFeedEl();
-            if (el) el.scrollTop = el.scrollHeight;
+            if (!el) return;
+            if (state.scrollDirection === 'up') {
+                el.scrollTop = 0;
+            } else {
+                el.scrollTop = el.scrollHeight;
+            }
         });
     }
+
+    // Backwards-compatible alias used elsewhere in the file
+    function scrollToBottom () { scrollToEdge(); }
 
     function appendToFeed (text, type, icon) {
         const el = getFeedEl();
         if (!el) return;
-        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        el.appendChild(makeFeedNode(text, type, icon || ''));
-        while (el.children.length > MAX_FEED) el.removeChild(el.firstChild);
-        if (nearBottom) scrollToBottom();
+        const node = makeFeedNode(text, type, icon || '');
+        if (state.scrollDirection === 'up') {
+            // Newest at top: insert at the start, trim from the end
+            const nearTop = el.scrollTop < 80;
+            el.insertBefore(node, el.firstChild);
+            while (el.children.length > MAX_FEED) el.removeChild(el.lastChild);
+            if (nearTop) scrollToEdge();
+        } else {
+            // Newest at bottom: append, trim from the start
+            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            el.appendChild(node);
+            while (el.children.length > MAX_FEED) el.removeChild(el.firstChild);
+            if (nearBottom) scrollToEdge();
+        }
     }
 
     function rebuildFeed () {
         const el = getFeedEl();
         if (!el) return;
         el.innerHTML = '';
-        feedLines.forEach(function (l) { el.appendChild(makeFeedNode(l.text, l.type, l.icon || '')); });
-        scrollToBottom();
+        if (state.scrollDirection === 'up') {
+            // Render newest first — iterate in reverse
+            for (let i = feedLines.length - 1; i >= 0; i--) {
+                const l = feedLines[i];
+                el.appendChild(makeFeedNode(l.text, l.type, l.icon || ''));
+            }
+        } else {
+            feedLines.forEach(function (l) { el.appendChild(makeFeedNode(l.text, l.type, l.icon || '')); });
+        }
+        scrollToEdge();
     }
 
     function pushLine (text, type, icon) {
@@ -1297,6 +1332,16 @@
         sv('tc-stat-comp', state.completion);
     }
 
+    function updateScrollDirBtn () {
+        const btn = document.getElementById('tc-btn-scroll-dir');
+        if (!btn) return;
+        if (state.scrollDirection === 'up') {
+            btn.innerHTML = '\u2191 Up';
+        } else {
+            btn.innerHTML = '\u2193 Down';
+        }
+    }
+
     function updatePauseBtn () {
         const btn = document.getElementById('tc-btn-pause');
         if (!btn) return;
@@ -1421,6 +1466,11 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 #tc-live-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--c-green);flex-shrink:0;animation:tc-pulse 2.5s ease-in-out infinite;}
 @keyframes tc-pulse{0%,100%{opacity:1;}50%{opacity:.15;}}
 #tc-rc-credits{display:none;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px 16px;text-align:center;flex:1;}
+#tc-rc-settings{display:none;flex-direction:column;align-items:stretch;gap:10px;padding:20px 18px;flex:1;}
+.tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;}
+.tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;}
+.tc-set-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:600;color:var(--c-mid);letter-spacing:.04em;}
+.tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;}
 .tc-cred-flag{font-size:36px;line-height:1;}
 .tc-cred-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;line-height:1.3;}
 .tc-cred-ver{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--c-dim);letter-spacing:.08em;}
@@ -1498,9 +1548,21 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
     <div class="tc-cred-msg">Bugs &amp; feedback welcome!<br>Find me in-game on Torn City.</div>
   </div>
+  <div id="tc-rc-settings">
+    <div class="tc-set-title">Settings</div>
+    <div class="tc-set-row">
+      <span class="tc-set-lbl">Commentary scroll</span>
+      <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8595; Down</button>
+    </div>
+    <div class="tc-set-hint">
+      Down: newest messages appear at the bottom, older scroll up.<br>
+      Up: newest messages appear at the top, older scroll down.
+    </div>
+  </div>
 </div>
 <div id="tc-rc-footer">
   <button id="tc-btn-credits" class="tc-foot-btn">Credits</button>
+  <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
   <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
   <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
   <button id="tc-btn-fix" class="tc-foot-btn">&#8862; Fix</button>
@@ -1513,14 +1575,33 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         document.getElementById('tc-btn-credits').addEventListener('click', function () {
             document.getElementById('tc-rc-main').style.display = 'none';
             document.getElementById('tc-rc-credits').style.display = 'flex';
+            document.getElementById('tc-rc-settings').style.display = 'none';
             document.getElementById('tc-btn-credits').style.display = 'none';
+            document.getElementById('tc-btn-settings').style.display = 'none';
             document.getElementById('tc-btn-back').style.display = '';
+        });
+        document.getElementById('tc-btn-settings').addEventListener('click', function () {
+            document.getElementById('tc-rc-main').style.display = 'none';
+            document.getElementById('tc-rc-credits').style.display = 'none';
+            document.getElementById('tc-rc-settings').style.display = 'flex';
+            document.getElementById('tc-btn-credits').style.display = 'none';
+            document.getElementById('tc-btn-settings').style.display = 'none';
+            document.getElementById('tc-btn-back').style.display = '';
+            updateScrollDirBtn();
         });
         document.getElementById('tc-btn-back').addEventListener('click', function () {
             document.getElementById('tc-rc-credits').style.display = 'none';
+            document.getElementById('tc-rc-settings').style.display = 'none';
             document.getElementById('tc-rc-main').style.display = '';
             document.getElementById('tc-btn-back').style.display = 'none';
             document.getElementById('tc-btn-credits').style.display = '';
+            document.getElementById('tc-btn-settings').style.display = '';
+        });
+        document.getElementById('tc-btn-scroll-dir').addEventListener('click', function () {
+            state.scrollDirection = state.scrollDirection === 'up' ? 'down' : 'up';
+            updateScrollDirBtn();
+            rebuildFeed();
+            saveState();
         });
         document.getElementById('tc-btn-pause').addEventListener('click', function () {
             commentaryPaused = !commentaryPaused;
@@ -1544,8 +1625,12 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             const ro = new ResizeObserver(function () {
                 const el = getFeedEl();
                 if (!el) return;
-                const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                if (nearBottom) el.scrollTop = el.scrollHeight;
+                if (state.scrollDirection === 'up') {
+                    if (el.scrollTop < 80) el.scrollTop = 0;
+                } else {
+                    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                    if (nearBottom) el.scrollTop = el.scrollHeight;
+                }
             });
             ro.observe(hud);
             const fi = getFeedEl();
@@ -1587,6 +1672,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         renderLeaderboard();
         renderRaceStats();
         updatePauseBtn();
+        updateScrollDirBtn();
         resetTimers();
         poll();
         setInterval(poll, POLL_MS);
