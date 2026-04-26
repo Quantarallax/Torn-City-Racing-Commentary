@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.36.0
+// @version      2.37.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.36.0';
+    const SCRIPT_VERSION = '2.37.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v46';
+    const STORAGE_KEY = 'tc_racecomm_v47';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -81,7 +81,8 @@
 
     const S = {
         MENU: 'MENU', COUNTDOWN: 'COUNTDOWN', PRE_LAUNCH: 'PRE_LAUNCH',
-        WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED'
+        WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
+        UNAVAILABLE: 'UNAVAILABLE'
     };
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
@@ -98,7 +99,12 @@
                 '{player} starts fighting {p2}.',
                 '{player} honks their horn in frustration.',
                 '{player} revs their engine, upping the temperature.',
-                'Fumes gather around the cluster of vehicles.'
+                'Fumes gather around the cluster of vehicles.',
+                'Oh, this will be interesting, I\'m sure.',
+                'We suspect the no weapons rule will not be followed.',
+                'Tick tick tick, *boom* Hopefully.',
+                'Excitement rings through the crowd.',
+                'Crowds are now gathering at all the best vantage points.'
             ],
             player: [
                 '{player} has settled into {pos} and holds their nerve.',
@@ -116,7 +122,9 @@
                 'Every driver coiled and ready. The start is almost upon us.',
                 'The grid trembles with anticipation. Seconds away.',
                 'All systems ready. The crowd has gone eerily quiet.',
-                'The lights are about to come on. This is the moment.'
+                'The lights are about to come on. This is the moment.',
+                'Pre-launch can be the worst part of the race.',
+                'Faction members hold banners up, their message clear.'
             ],
             player: [
                 '{player} poised in {pos}. The launch will be critical.',
@@ -147,7 +155,10 @@
                 'Someone opens fire on the crowd near the exit.',
                 '{track} proving as unforgiving as ever this afternoon.',
                 'Strategy plays a big role in how this one unfolds.',
-                'Every lap matters at this stage. No room for error.'
+                'Every lap matters at this stage. No room for error.',
+                "It's crazy today!",
+                'Looking forwards to how this race goes.',
+                'The crowd pushes forward, onto the track while the cars blast past.'
             ],
             player: [
                 '{player} sits in {pos}, keeping it clean and consistent.',
@@ -159,7 +170,10 @@
             funny: [
                 '{name} appears to be shooting at other cars.',
                 '{name} is driving backwards.',
-                'Looks like {name} is drinking a bottle of beer, feet on the steering wheel.'
+                'Looks like {name} is drinking a bottle of beer, feet on the steering wheel.',
+                '{name} pulls a 360, just for a laugh.',
+                '{name} swerves left and right, grinding rubber.',
+                'Showoff {name} blasts music out of their external speakers.'
             ],
             moverUp: [
                 '{mover} moves from {moverFrom} to {moverTo}! Charging through the field.',
@@ -199,7 +213,9 @@
                 '{p1name} right on the bumper of {p2name}. This is going to get interesting.',
                 'Wheel to wheel action — {p1name} and {p2name} are inseparable right now.',
                 '{p1name} and {p2name} locked in a fierce duel. Neither gives an inch.',
-                'The crowd on their feet as {p1name} and {p2name} go door to door.'
+                'The crowd on their feet as {p1name} and {p2name} go door to door.',
+                '{p1name} scrapes metal, {p2name} swerves with the impact.',
+                '{p1name} bumps their fender, {p2name} brake checks.'
             ],
             // These lines reference {p3} — ONLY used when racerCount >= 3
             position3: [
@@ -448,10 +464,14 @@
         crash: 'fl-crash', waiting: 'fl-waiting'
     };
 
-    function makeFeedNode (text, type, icon) {
+    function makeFeedNode (text, type, icon, isHtml) {
         const div = document.createElement('div');
         div.className = 'tc-fl ' + (TYPE_CLASS[type] || '');
-        div.innerHTML = (icon || '') + '<span class="tc-fl-text">' + escH(text) + '</span>';
+        // When isHtml is true, the text contains pre-built safe HTML (e.g. an
+        // anchor link) that we trust because it was constructed in our own code,
+        // not from user input. Otherwise text is escaped as usual.
+        const inner = isHtml ? text : escH(text);
+        div.innerHTML = (icon || '') + '<span class="tc-fl-text">' + inner + '</span>';
         return div;
     }
 
@@ -474,10 +494,10 @@
     // Backwards-compatible alias used elsewhere in the file
     function scrollToBottom () { scrollToEdge(); }
 
-    function appendToFeed (text, type, icon) {
+    function appendToFeed (text, type, icon, isHtml) {
         const el = getFeedEl();
         if (!el) return;
-        const node = makeFeedNode(text, type, icon || '');
+        const node = makeFeedNode(text, type, icon || '', isHtml);
         // Per spec: colour new commentary in white, with a .25s fade to normal.
         // Applies only to genuinely new messages — NOT when the feed is rebuilt
         // from persisted history (rebuildFeed does not call this function).
@@ -506,20 +526,20 @@
             // Render newest first — iterate in reverse
             for (let i = feedLines.length - 1; i >= 0; i--) {
                 const l = feedLines[i];
-                el.appendChild(makeFeedNode(l.text, l.type, l.icon || ''));
+                el.appendChild(makeFeedNode(l.text, l.type, l.icon || '', l.isHtml));
             }
         } else {
-            feedLines.forEach(function (l) { el.appendChild(makeFeedNode(l.text, l.type, l.icon || '')); });
+            feedLines.forEach(function (l) { el.appendChild(makeFeedNode(l.text, l.type, l.icon || '', l.isHtml)); });
         }
         scrollToEdge();
     }
 
-    function pushLine (text, type, icon) {
+    function pushLine (text, type, icon, isHtml) {
         const alwaysShow = (type === 'status' || type === 'finish' || type === 'outro' || type === 'crash');
         if (commentaryPaused && !alwaysShow) return;
-        feedLines.push({ text: text, type: type, icon: icon || '' });
+        feedLines.push({ text: text, type: type, icon: icon || '', isHtml: !!isHtml });
         if (feedLines.length > MAX_FEED) feedLines.shift();
-        appendToFeed(text, type, icon || '');
+        appendToFeed(text, type, icon || '', isHtml);
     }
 
     function clearFeed () {
@@ -546,10 +566,11 @@
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
                     } else if (currentStatus === S.PRE_LAUNCH) {
-                        // Rotate between two pre-launch arrival lines
+                        // Rotate between three pre-launch arrival lines
                         const preLaunchLines = [
                             r.name + ' just joined in position ' + posStr + '.',
-                            r.name + ' does a last minute check.'
+                            r.name + ' does a last minute check.',
+                            r.name + ' looks fidgety behind the wheel.'
                         ];
                         const choice = preLaunchLines[Math.floor(Math.random() * preLaunchLines.length)];
                         pushLine(choice, 'status', ICON.join);
@@ -913,6 +934,16 @@
             state.completion = '100%';
             renderRaceStats();
         }
+        if (newSt === S.UNAVAILABLE && oldSt !== S.UNAVAILABLE) {
+            clearFeed();
+            pushLine('Racetrack is unavailable at the moment.', 'status');
+            // Build the second line with a clickable link to the travel page.
+            // The text is HTML-trusted because we construct it ourselves with
+            // the player's name escaped via escH().
+            const safeName = escH(state.playerName !== '—' && state.playerName ? state.playerName : 'The driver');
+            const html = safeName + ' is currently <a class="tc-link" href="https://www.torn.com/page.php?sid=travel" target="_blank" rel="noopener">flying or abroad</a>.';
+            pushLine(html, 'status', '', true);
+        }
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
@@ -1181,6 +1212,12 @@
 
     function detectStatus () {
         const text = getPageText();
+        // Travel block: when the player is flying or abroad, Torn shows
+        // "This page is unavailable while you're traveling." — racing isn't
+        // possible during travel so return a dedicated UNAVAILABLE status.
+        if (/this\s+page\s+is\s+unavailable\s+while\s+you'?re\s+travel(l)?ing/i.test(text)) {
+            return S.UNAVAILABLE;
+        }
         if (text.toLowerCase().indexOf('crashed') !== -1 || document.querySelector('[class*="crashed"], [class*="wrecked"]')) return S.CRASHED;
         if (/race\s+finished/i.test(text) || /you\s+finished\s+in\s+\d/i.test(text) || document.querySelector('[class*="raceEnd"], [class*="raceFinished"]')) return S.ENDED;
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
@@ -1280,7 +1317,7 @@
             }
         }
 
-        if (newStatus !== S.MENU) {
+        if (newStatus !== S.MENU && newStatus !== S.UNAVAILABLE) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
             const co = scrapeCompletion();
@@ -1352,7 +1389,8 @@
             [S.WAITING]: { label: 'WAITING', cls: 'st-waiting' },
             [S.RACING]: { label: 'RACING', cls: 'st-racing' },
             [S.ENDED]: { label: 'ENDED', cls: 'st-ended' },
-            [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' }
+            [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
+            [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1363,6 +1401,7 @@
         const el = document.getElementById('tc-rc-lb-list');
         if (!el) return;
         if (state.status === S.MENU) { el.innerHTML = '<div class="tc-lb-empty">Select a race\u2026</div>'; return; }
+        if (state.status === S.UNAVAILABLE) { el.innerHTML = '<div class="tc-lb-empty">Travelling\u2026</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1479,7 +1518,9 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}
+.tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
+.tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
 #tc-rc-lb-col{position:absolute;top:0;left:0;bottom:0;width:142px;border-right:1px solid var(--c-border2);background:var(--c-bg2);display:flex;flex-direction:column;overflow:hidden;z-index:2;}
 #tc-rc-lb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:3px 0;min-height:0;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
