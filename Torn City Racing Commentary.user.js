@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.37.0
+// @version      2.38.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.37.0';
+    const SCRIPT_VERSION = '2.38.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v47';
+    const STORAGE_KEY = 'tc_racecomm_v48';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -82,8 +82,13 @@
     const S = {
         MENU: 'MENU', COUNTDOWN: 'COUNTDOWN', PRE_LAUNCH: 'PRE_LAUNCH',
         WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
-        UNAVAILABLE: 'UNAVAILABLE'
+        UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT'
     };
+
+    // Statuses where commentary is suppressed entirely after the entry message(s).
+    // The user will see the announcement once, then nothing more until the page
+    // returns to MENU (or some other active status).
+    const QUIET_STATUSES = ['CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT'];
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
     const LINES = {
@@ -608,6 +613,10 @@
     }
 
     function fireCommentary (st) {
+        // In quiet statuses (CRASHED, UNAVAILABLE, HOSPITAL, TIMED_OUT) the entry
+        // message(s) have already fired in onStatusChange. No further commentary
+        // should print until the player returns to a normal status.
+        if (QUIET_STATUSES.indexOf(st) !== -1) return;
         const now = Date.now();
 
         if (st === S.COUNTDOWN) {
@@ -944,6 +953,17 @@
             const html = safeName + ' is currently <a class="tc-link" href="https://www.torn.com/page.php?sid=travel" target="_blank" rel="noopener">flying or abroad</a>.';
             pushLine(html, 'status', '', true);
         }
+        if (newSt === S.HOSPITAL && oldSt !== S.HOSPITAL) {
+            clearFeed();
+            // Hospital: one message with "hospital" hyperlinked to the hospital page,
+            // then no further commentary until the page returns to a normal status.
+            const html = 'You are in <a class="tc-link" href="https://www.torn.com/hospitalview.php" target="_blank" rel="noopener">hospital</a>, you better stay and rest.';
+            pushLine(html, 'status', '', true);
+        }
+        if (newSt === S.TIMED_OUT && oldSt !== S.TIMED_OUT) {
+            clearFeed();
+            pushLine('Race timed out. Return to pits.', 'status');
+        }
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
@@ -1212,6 +1232,14 @@
 
     function detectStatus () {
         const text = getPageText();
+        // Hospital: player can't race at all while in hospital
+        if (/you\s+cannot\s+do\s+this\s+while\s+in\s+hospital/i.test(text)) {
+            return S.HOSPITAL;
+        }
+        // Race timed out: a previous race attempt failed to start
+        if (/your\s+last\s+race\s+timed\s+out\s+at/i.test(text)) {
+            return S.TIMED_OUT;
+        }
         // Travel block: when the player is flying or abroad, Torn shows
         // "This page is unavailable while you're traveling." — racing isn't
         // possible during travel so return a dedicated UNAVAILABLE status.
@@ -1317,7 +1345,8 @@
             }
         }
 
-        if (newStatus !== S.MENU && newStatus !== S.UNAVAILABLE) {
+        if (newStatus !== S.MENU && newStatus !== S.UNAVAILABLE
+            && newStatus !== S.HOSPITAL && newStatus !== S.TIMED_OUT) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
             const co = scrapeCompletion();
@@ -1390,7 +1419,9 @@
             [S.RACING]: { label: 'RACING', cls: 'st-racing' },
             [S.ENDED]: { label: 'ENDED', cls: 'st-ended' },
             [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
-            [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' }
+            [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' },
+            [S.HOSPITAL]: { label: 'HOSPITAL', cls: 'st-hospital' },
+            [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1402,6 +1433,8 @@
         if (!el) return;
         if (state.status === S.MENU) { el.innerHTML = '<div class="tc-lb-empty">Select a race\u2026</div>'; return; }
         if (state.status === S.UNAVAILABLE) { el.innerHTML = '<div class="tc-lb-empty">Travelling\u2026</div>'; return; }
+        if (state.status === S.HOSPITAL) { el.innerHTML = '<div class="tc-lb-empty">In hospital.</div>'; return; }
+        if (state.status === S.TIMED_OUT) { el.innerHTML = '<div class="tc-lb-empty">Race timed out.</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1518,7 +1551,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
