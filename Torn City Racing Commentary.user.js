@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.38.0
+// @version      2.39.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.38.0';
+    const SCRIPT_VERSION = '2.39.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v48';
+    const STORAGE_KEY = 'tc_racecomm_v49';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -82,13 +82,18 @@
     const S = {
         MENU: 'MENU', COUNTDOWN: 'COUNTDOWN', PRE_LAUNCH: 'PRE_LAUNCH',
         WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
-        UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT'
+        UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
+        ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
+        NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS'
     };
 
     // Statuses where commentary is suppressed entirely after the entry message(s).
     // The user will see the announcement once, then nothing more until the page
     // returns to MENU (or some other active status).
-    const QUIET_STATUSES = ['CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT'];
+    const QUIET_STATUSES = [
+        'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT',
+        'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS'
+    ];
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
     const LINES = {
@@ -268,6 +273,11 @@
         currentLap: '—',
         completion: '—',
         windowFixed: false,
+        // Persisted window placement: position and resized dimensions (floating mode only).
+        windowLeft: '',
+        windowTop: '',
+        windowWidth: '',
+        windowHeight: '',
         // Commentary feed scroll direction:
         // 'down' = newest at bottom, older scroll up off the top (default, matches classic log behaviour)
         // 'up'   = newest at top, older scroll down off the bottom (reverse chronological)
@@ -342,6 +352,10 @@
             state.currentLap = p.currentLap || '—';
             state.completion = p.completion || '—';
             state.windowFixed = p.windowFixed || false;
+            state.windowLeft = p.windowLeft || '';
+            state.windowTop = p.windowTop || '';
+            state.windowWidth = p.windowWidth || '';
+            state.windowHeight = p.windowHeight || '';
             state.scrollDirection = (p.scrollDirection === 'up' || p.scrollDirection === 'down')
                 ? p.scrollDirection : 'down';
             state.halfwayFired = p.halfwayFired || false;
@@ -386,6 +400,10 @@
                 currentLap: state.currentLap,
                 completion: state.completion,
                 windowFixed: state.windowFixed,
+                windowLeft: state.windowLeft,
+                windowTop: state.windowTop,
+                windowWidth: state.windowWidth,
+                windowHeight: state.windowHeight,
                 scrollDirection: state.scrollDirection,
                 halfwayFired: state.halfwayFired,
                 preLaunchMsgCount: state.preLaunchMsgCount,
@@ -962,7 +980,33 @@
         }
         if (newSt === S.TIMED_OUT && oldSt !== S.TIMED_OUT) {
             clearFeed();
+            pushLine('The racers have all gone home.', 'status');
+            pushLine('The track is deserted!', 'status');
             pushLine('Race timed out. Return to pits.', 'status');
+        }
+        if (newSt === S.ALREADY_STARTED && oldSt !== S.ALREADY_STARTED) {
+            clearFeed();
+            const safeName = (state.playerName !== '—' && state.playerName)
+                ? state.playerName : 'The driver';
+            pushLine(safeName + ' drives onto the paddock.', 'status');
+            pushLine('There are no racers, it is deserted.', 'status');
+            pushLine('Race has already started.', 'status');
+        }
+        if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL) {
+            clearFeed();
+            const safeName = (state.playerName !== '—' && state.playerName)
+                ? state.playerName : 'The driver';
+            pushLine(safeName + ' attempts to squeeze his car into the race.', 'status');
+            pushLine('And they are promptly warned back by armed marshalls.', 'status');
+            pushLine('Race is full.', 'status');
+        }
+        if (newSt === S.NOT_ENOUGH_FUNDS && oldSt !== S.NOT_ENOUGH_FUNDS) {
+            clearFeed();
+            const safeName = (state.playerName !== '—' && state.playerName)
+                ? state.playerName : 'The driver';
+            pushLine(safeName + ' drives onto the paddock.', 'status');
+            pushLine('But they are immediately turned around.', 'status');
+            pushLine('Not enough funds to enter race.', 'status');
         }
     }
 
@@ -1240,6 +1284,18 @@
         if (/your\s+last\s+race\s+timed\s+out\s+at/i.test(text)) {
             return S.TIMED_OUT;
         }
+        // Race already started: tried to join too late
+        if (/incorrect\s+race/i.test(text)) {
+            return S.ALREADY_STARTED;
+        }
+        // Race full: tried to join a full race
+        if (/maximum\s+amount\s+of\s+drivers\s+achieved/i.test(text)) {
+            return S.RACE_FULL;
+        }
+        // Not enough funds for race entry fee
+        if (/you\s+don'?t\s+have\s+enough\s+money/i.test(text)) {
+            return S.NOT_ENOUGH_FUNDS;
+        }
         // Travel block: when the player is flying or abroad, Torn shows
         // "This page is unavailable while you're traveling." — racing isn't
         // possible during travel so return a dedicated UNAVAILABLE status.
@@ -1345,8 +1401,10 @@
             }
         }
 
-        if (newStatus !== S.MENU && newStatus !== S.UNAVAILABLE
-            && newStatus !== S.HOSPITAL && newStatus !== S.TIMED_OUT) {
+        // Blank stats in all menu/error/quiet statuses
+        const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.TIMED_OUT,
+            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS];
+        if (blankStatsStatuses.indexOf(newStatus) === -1) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
             const co = scrapeCompletion();
@@ -1421,7 +1479,10 @@
             [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
             [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' },
             [S.HOSPITAL]: { label: 'HOSPITAL', cls: 'st-hospital' },
-            [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' }
+            [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' },
+            [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
+            [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
+            [S.NOT_ENOUGH_FUNDS]: { label: 'NO FUNDS', cls: 'st-nofunds' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1435,6 +1496,9 @@
         if (state.status === S.UNAVAILABLE) { el.innerHTML = '<div class="tc-lb-empty">Travelling\u2026</div>'; return; }
         if (state.status === S.HOSPITAL) { el.innerHTML = '<div class="tc-lb-empty">In hospital.</div>'; return; }
         if (state.status === S.TIMED_OUT) { el.innerHTML = '<div class="tc-lb-empty">Race timed out.</div>'; return; }
+        if (state.status === S.ALREADY_STARTED) { el.innerHTML = '<div class="tc-lb-empty">Race already started.</div>'; return; }
+        if (state.status === S.RACE_FULL) { el.innerHTML = '<div class="tc-lb-empty">Race full.</div>'; return; }
+        if (state.status === S.NOT_ENOUGH_FUNDS) { el.innerHTML = '<div class="tc-lb-empty">Insufficient funds.</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1485,7 +1549,22 @@
         btn.classList.toggle('tc-btn-active', state.windowFixed);
         const hud = document.getElementById('tc-rc-hud');
         if (hud) {
-            if (state.windowFixed) { hud.classList.add('tc-fixed'); } else { hud.classList.remove('tc-fixed'); }
+            if (state.windowFixed) {
+                hud.classList.add('tc-fixed');
+                // Strip inline position/size so the .tc-fixed CSS rule fully takes effect
+                hud.style.left = '';
+                hud.style.top = '';
+                hud.style.right = '';
+                hud.style.width = '';
+                hud.style.height = '';
+            } else {
+                hud.classList.remove('tc-fixed');
+                // Restore persisted floating-mode position and size
+                if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
+                if (state.windowTop) { hud.style.top = state.windowTop; }
+                if (state.windowWidth) { hud.style.width = state.windowWidth; }
+                if (state.windowHeight) { hud.style.height = state.windowHeight; }
+            }
         }
     }
 
@@ -1522,7 +1601,14 @@
             hudEl.style.top = (st + e.clientY - oy) + 'px';
             hudEl.style.right = 'auto';
         });
-        document.addEventListener('mouseup', function () { dragging = false; });
+        document.addEventListener('mouseup', function () {
+            if (!dragging) return;
+            dragging = false;
+            // Persist the new position so it survives a page refresh
+            state.windowLeft = hudEl.style.left || '';
+            state.windowTop = hudEl.style.top || '';
+            saveState();
+        });
     }
 
     // ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -1551,7 +1637,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
@@ -1703,6 +1789,13 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
   <span id="tc-live-dot"></span>
 </div>`;
         document.body.appendChild(hud);
+        // Restore persisted window position and size (floating mode only)
+        if (!state.windowFixed) {
+            if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
+            if (state.windowTop) { hud.style.top = state.windowTop; }
+            if (state.windowWidth) { hud.style.width = state.windowWidth; }
+            if (state.windowHeight) { hud.style.height = state.windowHeight; }
+        }
         makeDraggable(hud, document.getElementById('tc-rc-drag'));
         document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
         document.getElementById('tc-btn-settings').addEventListener('click', function () {
@@ -1744,6 +1837,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         updatePauseBtn();
         updateFixBtn();
         if (typeof ResizeObserver !== 'undefined') {
+            let lastSavedW = '', lastSavedH = '';
             const ro = new ResizeObserver(function () {
                 const el = getFeedEl();
                 if (!el) return;
@@ -1752,6 +1846,21 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                 } else {
                     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
                     if (nearBottom) el.scrollTop = el.scrollHeight;
+                }
+                // Persist resized HUD dimensions when the user manually resizes.
+                // Only meaningful in floating mode; in fixed mode the HUD width
+                // is forced to 100% via CSS so we skip that case.
+                if (!state.windowFixed) {
+                    const r = hud.getBoundingClientRect();
+                    const w = Math.round(r.width) + 'px';
+                    const h = Math.round(r.height) + 'px';
+                    if (w !== lastSavedW || h !== lastSavedH) {
+                        lastSavedW = w; lastSavedH = h;
+                        state.windowWidth = w;
+                        state.windowHeight = h;
+                        // Don't call saveState() here on every observer fire — the next
+                        // poll() tick will pick it up via its own saveState().
+                    }
                 }
             });
             ro.observe(hud);
