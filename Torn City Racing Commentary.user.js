@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.40.0
+// @version      2.42.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.40.0';
+    const SCRIPT_VERSION = '2.42.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v50';
+    const STORAGE_KEY = 'tc_racecomm_v52';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -828,6 +828,9 @@
             // Skip: stale crash markers inside Torn's Events / Messages / Awards
             // dropdowns are race history, not the current race.
             if (isInsideTornMenu(li)) return;
+            // Skip: rows whose text reads like an Events feed entry — the "crash"
+            // marker there describes a past race, not a live one.
+            if (looksLikeEventsRow(li)) return;
 
             // Extract the racer name from common patterns
             let name = '';
@@ -847,7 +850,8 @@
                     const t = (el.textContent || '').trim();
                     // Skip obvious non-names (status text, numbers, etc.)
                     if (t && t.length >= 2 && t.length <= 40 &&
-                        !/^\d+$/.test(t) && !/^(crash|crashed|status)/i.test(t)) {
+                        !/^\d+$/.test(t) && !/^(crash|crashed|status)/i.test(t) &&
+                        !/^You(\s|$)/.test(t)) {
                         name = t;
                     }
                 }
@@ -1046,6 +1050,13 @@
     // overlay elements before reading innerText. This is the most reliable way
     // to isolate Torn's own page text from other running Tampermonkey scripts,
     // without complex TreeWalker filtering that can miss edge cases.
+    // Compiled once: matches the Events-feed signature anywhere in a string.
+    // Pattern: a digit followed by a time unit (s/m/h/d/w) as a standalone token,
+    // followed by whitespace and any non-whitespace. This catches things like
+    // "1m You finished in", "2h crashed", "30s came 3rd". Real racing-page text
+    // never naturally contains this pattern.
+    const EVENTS_TEXT_PATTERN = /(^|[\s>])\d+(s|m|h|d|w)\s+\S/i;
+
     function getPageText () {
         if (!document.body) return '';
         try {
@@ -1083,7 +1094,20 @@
             tornMenus.forEach(function (el) {
                 if (el.parentNode) el.parentNode.removeChild(el);
             });
-            return clone.innerText || '';
+            let raw = clone.innerText || '';
+            // Final scrub: remove any sentence/line that bears the Events-feed
+            // signature (a "1m"/"2h"/"5d" recency counter followed by event prose,
+            // or a "You ..." sentence pattern). These are Events menu entries that
+            // survived the structural strip and would otherwise corrupt status
+            // detection — e.g. an Events entry containing "crashed" was triggering
+            // false CRASHED status changes.
+            raw = raw.split(/\n+/).filter(function (line) {
+                const t = line.trim();
+                if (!t) return true;
+                if (EVENTS_TEXT_PATTERN.test(t)) return false;
+                return true;
+            }).join('\n');
+            return raw;
         } catch (_) {
             return document.body.innerText || '';
         }
@@ -1230,6 +1254,20 @@
         );
     }
 
+    // Heuristic fallback for Events-menu pollution that survives the structural
+    // strip. Per spec: Torn's Events feed entries are prefixed with a recency
+    // counter (e.g. "1m", "2h", "5d", "30s") — that pattern is the reliable
+    // fingerprint for Events feed text. A real racer row never contains
+    // "<digit>+<smhdw> <Word>" because driver rows show position + name only.
+    // The "You" sentence pattern is also a strong tell, but is filtered too
+    // since Events entries describe the user's own past actions ("You came...").
+    function looksLikeEventsRow (el) {
+        if (!el) return false;
+        const txt = (el.textContent || '').trim();
+        if (!txt) return false;
+        return EVENTS_TEXT_PATTERN.test(txt);
+    }
+
     function scrapeRacers () {
         // This returns names and positions for leaderboard display and movement detection.
         // Its .length is NOT used for racerCount — use scrapePosition().total for that.
@@ -1239,11 +1277,14 @@
             // Skip rows inside Torn's Events / Messages / Awards dropdowns —
             // those contain stale race result data that would corrupt the scrape.
             if (isInsideTornMenu(ul)) return;
+            // Heuristic fallback: skip rows whose text reads like an Events feed
+            // sentence ("You came 3rd in...", etc.).
+            if (looksLikeEventsRow(ul)) return;
             const nameEl = ul.querySelector('li.name, li[class*="name"]');
             const posEl = ul.querySelector('li.position, li[class*="position"], li[class*="pos"], li[class*="rank"]');
             const name = nameEl ? nameEl.textContent.trim() : '';
             const posNum = parseInt(posEl ? posEl.textContent.trim() : '', 10) || idx + 1;
-            if (name && name.length > 1 && name.length < 40) {
+            if (name && name.length > 1 && name.length < 40 && !/^You(\s|$)/.test(name)) {
                 racers.push({
                     name: name,
                     pos: String(posNum),
@@ -1261,11 +1302,12 @@
             );
             rows.forEach(function (row) {
                 if (isInsideTornMenu(row)) return;
+                if (looksLikeEventsRow(row)) return;
                 const nameEl = row.querySelector('[class*="name"], [class*="player"]');
                 const posEl = row.querySelector('[class*="pos"], [class*="rank"], [class*="place"]');
                 const name = nameEl ? nameEl.textContent.trim() : '';
                 const pos = posEl ? posEl.textContent.trim() : '';
-                if (name && name.length > 1 && name.length < 40) {
+                if (name && name.length > 1 && name.length < 40 && !/^You(\s|$)/.test(name)) {
                     racers.push({
                         name: name,
                         pos: pos || '?',
@@ -1346,7 +1388,31 @@
         if (/this\s+page\s+is\s+unavailable\s+while\s+you'?re\s+travel(l)?ing/i.test(text)) {
             return S.UNAVAILABLE;
         }
-        if (text.toLowerCase().indexOf('crashed') !== -1 || document.querySelector('[class*="crashed"], [class*="wrecked"]')) return S.CRASHED;
+        // CRASHED detection: rely ONLY on Torn's structural crash UI markers
+        // attached to real driver rows. The previous text-based check
+        // ("crashed" in page text) was triggered falsely when an Events-menu
+        // entry containing the word "crashed" scrolled into view, leaving the
+        // script stuck in CRASHED mid-race. We now require an actual crash
+        // marker element that is NOT inside Torn's top-bar dropdowns.
+        const crashMarkers = document.querySelectorAll(
+            'div.status.crash, div[class*="status"][class*="crash"], ' +
+            '[class*="statusCrash"], [class*="crashed"], [class*="wrecked"]'
+        );
+        for (let i = 0; i < crashMarkers.length; i++) {
+            const m = crashMarkers[i];
+            // Skip our own HUD and Torn's notification dropdowns
+            if (m.closest('#tc-rc-hud')) continue;
+            if (isInsideTornMenu(m)) continue;
+            // Confirm it's attached to (or near) the player's own row by
+            // checking the enclosing driver row's text contains the player name.
+            const li = m.closest('li') || m.closest('[class*="driver"]') || m.closest('[class*="racer"]');
+            if (!li) continue;
+            if (looksLikeEventsRow(li)) continue;
+            const liText = (li.textContent || '');
+            if (state.playerName && state.playerName !== '—' && liText.indexOf(state.playerName) !== -1) {
+                return S.CRASHED;
+            }
+        }
         if (/race\s+finished/i.test(text) || /you\s+finished\s+in\s+\d/i.test(text) || document.querySelector('[class*="raceEnd"], [class*="raceFinished"]')) return S.ENDED;
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
         if (/not\s+enough\s+drivers/i.test(text)) {
