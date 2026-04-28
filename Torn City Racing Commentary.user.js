@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.42.0
+// @version      2.43.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.42.0';
+    const SCRIPT_VERSION = '2.43.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v52';
+    const STORAGE_KEY = 'tc_racecomm_v53';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -1078,7 +1078,9 @@
             // gets falsely picked up by our scrapers. The dropdowns share several
             // class/id patterns we can target broadly.
             const tornMenus = clone.querySelectorAll(
-                // Events drop-down menu
+                // Torn's Events drop-down — the precise class confirmed by the user
+                '.recent-history-content,[class*="recent-history-content"],' +
+                // Events drop-down menu (other class variants)
                 '[id*="events-list"],[id*="eventsList"],[id*="event-list"],[id*="eventList"],' +
                 '[class*="events-list"],[class*="eventsList"],[class*="event-list"],[class*="eventList"],' +
                 '[class*="eventsMenu"],[class*="events-menu"],' +
@@ -1244,6 +1246,9 @@
     function isInsideTornMenu (el) {
         if (!el) return false;
         return !!el.closest(
+            // The precise Torn Events panel class (confirmed by user)
+            '.recent-history-content,[class*="recent-history-content"],' +
+            // Other Events drop-down variants
             '[id*="events-list"],[id*="eventsList"],[id*="event-list"],[id*="eventList"],' +
             '[class*="events-list"],[class*="eventsList"],[class*="event-list"],[class*="eventList"],' +
             '[class*="eventsMenu"],[class*="events-menu"],' +
