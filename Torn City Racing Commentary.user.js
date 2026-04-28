@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.39.0
+// @version      2.40.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.39.0';
+    const SCRIPT_VERSION = '2.40.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v49';
+    const STORAGE_KEY = 'tc_racecomm_v50';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -825,6 +825,9 @@
             if (!li) return;
             // Skip: our own HUD must never be treated as Torn DOM
             if (li.closest('#tc-rc-hud')) return;
+            // Skip: stale crash markers inside Torn's Events / Messages / Awards
+            // dropdowns are race history, not the current race.
+            if (isInsideTornMenu(li)) return;
 
             // Extract the racer name from common patterns
             let name = '';
@@ -1059,6 +1062,27 @@
                 '[class^="tc-"],[class^="torn-"],[class^="tm-"],[class^="gm-"]'
             );
             overlays.forEach(function (el) { el.parentNode.removeChild(el); });
+            // Remove Torn's top-bar dropdowns (Events, Messages, Awards, etc.).
+            // When the Events menu is open it shows recent race-result text that
+            // gets falsely picked up by our scrapers. The dropdowns share several
+            // class/id patterns we can target broadly.
+            const tornMenus = clone.querySelectorAll(
+                // Events drop-down menu
+                '[id*="events-list"],[id*="eventsList"],[id*="event-list"],[id*="eventList"],' +
+                '[class*="events-list"],[class*="eventsList"],[class*="event-list"],[class*="eventList"],' +
+                '[class*="eventsMenu"],[class*="events-menu"],' +
+                // Sidebar/topbar item that wraps the dropdown
+                '[id*="event-items"],[id*="eventItems"],[class*="event-items"],[class*="eventItems"],' +
+                // Generic notification-menu containers commonly used by Torn's topbar
+                '[class*="notifications-list"],[class*="notificationsList"],' +
+                '[class*="messages-list"],[class*="messagesList"],' +
+                '[class*="awards-list"],[class*="awardsList"],' +
+                // Torn marks open dropdowns with these state classes — strip the entire panel
+                '[class*="dropdown"][class*="open"],[class*="dropdown"][class*="active"]'
+            );
+            tornMenus.forEach(function (el) {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            });
             return clone.innerText || '';
         } catch (_) {
             return document.body.innerText || '';
@@ -1190,12 +1214,31 @@
         return '';
     }
 
+    // Returns true if `el` (or any ancestor) belongs to one of Torn's top-bar
+    // dropdown panels (Events, Messages, Awards, etc.). When those panels are
+    // open they can contain race-result content that pollutes our scraping.
+    function isInsideTornMenu (el) {
+        if (!el) return false;
+        return !!el.closest(
+            '[id*="events-list"],[id*="eventsList"],[id*="event-list"],[id*="eventList"],' +
+            '[class*="events-list"],[class*="eventsList"],[class*="event-list"],[class*="eventList"],' +
+            '[class*="eventsMenu"],[class*="events-menu"],' +
+            '[id*="event-items"],[id*="eventItems"],[class*="event-items"],[class*="eventItems"],' +
+            '[class*="notifications-list"],[class*="notificationsList"],' +
+            '[class*="messages-list"],[class*="messagesList"],' +
+            '[class*="awards-list"],[class*="awardsList"]'
+        );
+    }
+
     function scrapeRacers () {
         // This returns names and positions for leaderboard display and movement detection.
         // Its .length is NOT used for racerCount — use scrapePosition().total for that.
         const racers = [];
         const driverItems = document.querySelectorAll('ul.driver-item, ul[class*="driver-item"]');
         driverItems.forEach(function (ul, idx) {
+            // Skip rows inside Torn's Events / Messages / Awards dropdowns —
+            // those contain stale race result data that would corrupt the scrape.
+            if (isInsideTornMenu(ul)) return;
             const nameEl = ul.querySelector('li.name, li[class*="name"]');
             const posEl = ul.querySelector('li.position, li[class*="position"], li[class*="pos"], li[class*="rank"]');
             const name = nameEl ? nameEl.textContent.trim() : '';
@@ -1217,6 +1260,7 @@
                 '[class*="leaderboard"] tr, [class*="standings"] tr, [class*="raceTable"] tr, [class*="raceList"] li'
             );
             rows.forEach(function (row) {
+                if (isInsideTornMenu(row)) return;
                 const nameEl = row.querySelector('[class*="name"], [class*="player"]');
                 const posEl = row.querySelector('[class*="pos"], [class*="rank"], [class*="place"]');
                 const name = nameEl ? nameEl.textContent.trim() : '';
@@ -1482,7 +1526,7 @@
             [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' },
             [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
-            [S.NOT_ENOUGH_FUNDS]: { label: 'NO FUNDS', cls: 'st-nofunds' }
+            [S.NOT_ENOUGH_FUNDS]: { label: 'INSUFFICIENT FUNDS', cls: 'st-nofunds' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
