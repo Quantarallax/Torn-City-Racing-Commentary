@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.44.0
+// @version      2.48.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.44.0';
+    const SCRIPT_VERSION = '2.48.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,19 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v54';
+    const STORAGE_KEY = 'tc_racecomm_v58';
+
+    // Words we know are page UI labels, never real Torn usernames. If the
+    // name regex matches one of these, the scrape is faulty (e.g. text like
+    // "Player Name: Position" running together) and we reject the result.
+    const NAME_BLACKLIST = /^(Position|Name|Player|Track|Car|Lap|Last|Status|Score|Points|Driver|Racer|Class|Time|Rank|Place|None|Unknown|Loading)$/i;
+
+    // Detects feed lines from older script versions where a UI-label word leaked
+    // in as the player name. Examples: "Position has joined the track in 1st.",
+    // "Position rolls onto the track in 3rd.", "Name drives onto the paddock."
+    // The current code paths can't produce these, so any line matching this
+    // pattern is stale persisted data and is filtered out on load.
+    const STALE_NAME_LEAK_PATTERN = /^\s*(Position|Name|Player|Track|Car|Lap|Last|Status|Score|Points|Driver|Racer|Class|Time|Rank|Place|None|Unknown|Loading)\s+(has\s+joined|rolls\s+onto|drives\s+onto|joins|crosses|attempts|is\s+|appears|pulls|swerves|bumps|scrapes|fiddles|honks|revs|starts|moves|sits|threads)/i;
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -84,7 +96,8 @@
         WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
         UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
-        NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED'
+        NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED',
+        TORN_DOWN: 'TORN_DOWN'
     };
 
     // Statuses where commentary is suppressed entirely after the entry message(s).
@@ -92,7 +105,8 @@
     // returns to MENU (or some other active status).
     const QUIET_STATUSES = [
         'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT',
-        'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED'
+        'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED',
+        'TORN_DOWN'
     ];
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
@@ -158,10 +172,15 @@
                 'The crowd goes wild.',
                 'Someone from the crowd throws a grenade at the track.',
                 'A fight breaks out near the starting line.',
+                'The cars are SCREAMING down the track.',
+                'Carnage here, carnage there, carnage EVERYWHERE.',
                 'Someone carelessly walks into the path of traffic! Oh dear.',
+                'The crowd screams in appreciation.',
                 'Someone released a spike-strip onto the track.',
                 "There's a massive oil spillage and debris at the first turn.",
                 'Explosions can be heard across the track area.',
+                'The crowd chants and claps in morbid fascination of potential violence.',
+                'A large crowd today.',
                 'Someone opens fire on the crowd near the exit.',
                 '{track} proving as unforgiving as ever this afternoon.',
                 'Strategy plays a big role in how this one unfolds.',
@@ -337,6 +356,9 @@
             const p = JSON.parse(raw);
             state.status = p.status || S.MENU;
             state.playerName = p.playerName || '—';
+            // Defensive: if a previous version persisted a UI-label as the player
+            // name (e.g. "Position" from a faulty scrape), drop it so we re-scrape.
+            if (NAME_BLACKLIST.test(state.playerName)) state.playerName = '—';
             state.track = p.track || '—';
             state.car = p.car || '—';
             state.position = p.position || '—';
@@ -361,6 +383,17 @@
             state.halfwayFired = p.halfwayFired || false;
             state.preLaunchMsgCount = p.preLaunchMsgCount || 0;
             feedLines = p.feedLines || [];
+            // Scrub any persisted feed lines from previous versions that contain
+            // the "Position has joined..." class of bug — i.e. lines that begin
+            // with a known UI-label word followed by a verb. These are stale
+            // entries from older script versions where a faulty name scrape let
+            // a UI label leak into the message; they re-appear on every refresh
+            // and look like a live bug. The current code paths can't generate
+            // them, so it's safe to drop them on sight.
+            feedLines = feedLines.filter(function (line) {
+                if (!line || !line.text) return true;
+                return !STALE_NAME_LEAK_PATTERN.test(line.text);
+            });
             recentByType = p.recentByType || {
                 ambient: [], player: [], position: [],
                 moverUp: [], moverDown: [],
@@ -427,8 +460,16 @@
     }
 
     function fill (tpl, extras) {
+        // Defensive: if state.playerName is somehow the placeholder dash, empty,
+        // or a UI-label word, fall back to a generic word rather than letting
+        // bad data render in commentary. This is belt-and-braces — the scraper
+        // and entry-message guards already filter at source — but covers any
+        // late-arriving template call before name detection has settled.
+        const safePlayer = (state.playerName && state.playerName !== '—'
+            && !NAME_BLACKLIST.test(state.playerName))
+            ? state.playerName : 'The driver';
         const vars = Object.assign({
-            player: state.playerName,
+            player: safePlayer,
             track: state.track !== '—' ? state.track : 'the circuit',
             car: state.car !== '—' ? state.car : 'their car',
             pos: ordinal(parseInt(state.position, 10) || 0),
@@ -439,7 +480,14 @@
             total: String(state.racerCount || state.racers.length || '?')
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
-            return vars[k] !== undefined ? vars[k] : k;
+            // If a template token is unknown, return the original {token}
+            // form rather than the bare key. The previous fallback returned
+            // the literal key (e.g. "{Position}" → "Position"), which is
+            // exactly the silent-failure mode that produced the long-standing
+            // "Position has joined the track" rendering bug — a bad template
+            // token would render as a UI-label word that looked like a real
+            // player name. Returning {token} makes the bug visible instantly.
+            return vars[k] !== undefined ? vars[k] : '{' + k + '}';
         });
     }
 
@@ -500,13 +548,26 @@
 
     function getFeedEl () { return document.getElementById('tc-feed-inner'); }
 
+    // Per spec: certain quiet statuses must always render commentary top-down,
+    // regardless of the user's scroll-direction setting. These statuses have a
+    // fixed, short sequence of messages that read as a list — they should not
+    // be reversed when the user has set scrollDirection to 'up'.
+    const FORCE_TOP_DOWN_STATUSES = [
+        'HOSPITAL', 'TIMED_OUT', 'ALREADY_STARTED', 'NOT_ALLOWED',
+        'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'TORN_DOWN', 'UNAVAILABLE'
+    ];
+    function effectiveScrollDirection () {
+        if (FORCE_TOP_DOWN_STATUSES.indexOf(state.status) !== -1) return 'down';
+        return state.scrollDirection;
+    }
+
     // In 'down' mode newest entries are at the bottom — auto-scroll keeps bottom visible.
     // In 'up' mode newest entries are at the top — auto-scroll keeps top visible.
     function scrollToEdge () {
         requestAnimationFrame(function () {
             const el = getFeedEl();
             if (!el) return;
-            if (state.scrollDirection === 'up') {
+            if (effectiveScrollDirection() === 'up') {
                 el.scrollTop = 0;
             } else {
                 el.scrollTop = el.scrollHeight;
@@ -526,7 +587,7 @@
         // from persisted history (rebuildFeed does not call this function).
         node.classList.add('tc-fl-new');
         setTimeout(function () { node.classList.remove('tc-fl-new'); }, 250);
-        if (state.scrollDirection === 'up') {
+        if (effectiveScrollDirection() === 'up') {
             // Newest at top: insert at the start, trim from the end
             const nearTop = el.scrollTop < 80;
             el.insertBefore(node, el.firstChild);
@@ -545,7 +606,7 @@
         const el = getFeedEl();
         if (!el) return;
         el.innerHTML = '';
-        if (state.scrollDirection === 'up') {
+        if (effectiveScrollDirection() === 'up') {
             // Render newest first — iterate in reverse
             for (let i = feedLines.length - 1; i >= 0; i--) {
                 const l = feedLines[i];
@@ -922,7 +983,8 @@
                 );
             }
             // Only show the join message when we have a real name and position.
-            const validName = state.playerName !== '—' && state.playerName !== '';
+            const validName = state.playerName !== '—' && state.playerName !== ''
+                && !NAME_BLACKLIST.test(state.playerName);
             const validPos = parseInt(state.position, 10) >= 1;
             if (validName && validPos) {
                 pushLine(fill('{player} rolls onto the track in {pos}.'), 'status', ICON.join);
@@ -1003,8 +1065,8 @@
             clearFeed();
             const safeName = (state.playerName !== '—' && state.playerName)
                 ? state.playerName : 'The driver';
-            pushLine(safeName + ' attempts to squeeze his car into the race.', 'status');
-            pushLine('And they are promptly warned back by armed marshalls.', 'status');
+            pushLine(safeName + ' attempts to squeeze his car onto the race.', 'status');
+            pushLine('Armed marshalls draw their weapons.', 'status');
             pushLine('Race is full.', 'status');
         }
         if (newSt === S.NOT_ENOUGH_FUNDS && oldSt !== S.NOT_ENOUGH_FUNDS) {
@@ -1024,6 +1086,10 @@
             pushLine('Marshalls frantically point towards the exit.', 'status');
             pushLine('"Can\'t you read the race specs. You fool"', 'status');
             pushLine('Incorrect car chosen.', 'status');
+        }
+        if (newSt === S.TORN_DOWN && oldSt !== S.TORN_DOWN) {
+            clearFeed();
+            pushLine('Please wait.', 'status');
         }
     }
 
@@ -1127,7 +1193,10 @@
 
     function scrapeName () {
         const m = getPageText().match(/Name:\s+([A-Za-z0-9_\-[\]]+)/);
-        return m ? m[1].trim() : null;
+        if (!m) return null;
+        const candidate = m[1].trim();
+        if (NAME_BLACKLIST.test(candidate)) return null;
+        return candidate;
     }
 
     function scrapeTrack () {
@@ -1377,6 +1446,11 @@
 
     function detectStatus () {
         const text = getPageText();
+        // Torn site-wide outage: when Torn itself is down, racing isn't possible.
+        // Highest-priority detection so we don't try to interpret half-rendered DOM.
+        if (/torn\s+is\s+currently\s+down/i.test(text)) {
+            return S.TORN_DOWN;
+        }
         // Hospital: player can't race at all while in hospital
         if (/you\s+cannot\s+do\s+this\s+while\s+in\s+hospital/i.test(text)) {
             return S.HOSPITAL;
@@ -1533,7 +1607,7 @@
 
         // Blank stats in all menu/error/quiet statuses
         const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.TIMED_OUT,
-            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED];
+            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED, S.TORN_DOWN];
         if (blankStatsStatuses.indexOf(newStatus) === -1) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
@@ -1548,9 +1622,13 @@
         }
 
         if (newStatus !== currentStatus) {
+            // Update state.status BEFORE firing the transition handler so that
+            // any pushLine() calls inside the handler see the new status. This
+            // matters for effectiveScrollDirection() which forces top-down
+            // rendering for certain quiet statuses (HOSPITAL, RACE_FULL, etc.).
+            state.status = newStatus;
             onStatusChange(currentStatus, newStatus);
             currentStatus = newStatus;
-            state.status = newStatus;
         }
 
         if (state.status === S.ENDED) processFinishers(scrapeFinishers());
@@ -1613,7 +1691,8 @@
             [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
             [S.NOT_ENOUGH_FUNDS]: { label: 'INSUFFICIENT FUNDS', cls: 'st-nofunds' },
-            [S.NOT_ALLOWED]: { label: 'NOT ALLOWED', cls: 'st-notallowed' }
+            [S.NOT_ALLOWED]: { label: 'NOT ALLOWED', cls: 'st-notallowed' },
+            [S.TORN_DOWN]: { label: 'RECONNECTING TO RACETRACK', cls: 'st-torndown' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1631,6 +1710,7 @@
         if (state.status === S.RACE_FULL) { el.innerHTML = '<div class="tc-lb-empty">Race full.</div>'; return; }
         if (state.status === S.NOT_ENOUGH_FUNDS) { el.innerHTML = '<div class="tc-lb-empty">Insufficient funds.</div>'; return; }
         if (state.status === S.NOT_ALLOWED) { el.innerHTML = '<div class="tc-lb-empty">Incorrect car.</div>'; return; }
+        if (state.status === S.TORN_DOWN) { el.innerHTML = '<div class="tc-lb-empty">Reconnecting\u2026</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1769,7 +1849,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
