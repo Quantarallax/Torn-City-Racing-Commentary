@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.43.0
+// @version      2.44.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.43.0';
+    const SCRIPT_VERSION = '2.44.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v53';
+    const STORAGE_KEY = 'tc_racecomm_v54';
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
 
@@ -84,7 +84,7 @@
         WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
         UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
-        NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS'
+        NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED'
     };
 
     // Statuses where commentary is suppressed entirely after the entry message(s).
@@ -92,7 +92,7 @@
     // returns to MENU (or some other active status).
     const QUIET_STATUSES = [
         'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT',
-        'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS'
+        'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED'
     ];
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
@@ -279,9 +279,9 @@
         windowWidth: '',
         windowHeight: '',
         // Commentary feed scroll direction:
-        // 'down' = newest at bottom, older scroll up off the top (default, matches classic log behaviour)
-        // 'up'   = newest at top, older scroll down off the bottom (reverse chronological)
-        scrollDirection: 'down',
+        // 'down' = newest at bottom, older scroll up off the top
+        // 'up'   = newest at top, older scroll down off the bottom (default per spec)
+        scrollDirection: 'up',
         halfwayFired: false,
         preLaunchMsgCount: 0
     };
@@ -357,7 +357,7 @@
             state.windowWidth = p.windowWidth || '';
             state.windowHeight = p.windowHeight || '';
             state.scrollDirection = (p.scrollDirection === 'up' || p.scrollDirection === 'down')
-                ? p.scrollDirection : 'down';
+                ? p.scrollDirection : 'up';
             state.halfwayFired = p.halfwayFired || false;
             state.preLaunchMsgCount = p.preLaunchMsgCount || 0;
             feedLines = p.feedLines || [];
@@ -1015,6 +1015,16 @@
             pushLine('But they are immediately turned around.', 'status');
             pushLine('Not enough funds to enter race.', 'status');
         }
+        if (newSt === S.NOT_ALLOWED && oldSt !== S.NOT_ALLOWED) {
+            clearFeed();
+            const safeName = (state.playerName !== '—' && state.playerName)
+                ? state.playerName : 'The driver';
+            const safeCar = (state.car !== '—' && state.car) ? state.car : 'car';
+            pushLine(safeName + ' drives onto the paddock in their ' + safeCar + '.', 'status');
+            pushLine('Marshalls frantically point towards the exit.', 'status');
+            pushLine('"Can\'t you read the race specs. You fool"', 'status');
+            pushLine('Incorrect car chosen.', 'status');
+        }
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
@@ -1375,6 +1385,11 @@
         if (/your\s+last\s+race\s+timed\s+out\s+at/i.test(text)) {
             return S.TIMED_OUT;
         }
+        // Not allowed: incorrect car for the chosen race. Must be checked BEFORE
+        // the "Incorrect race" check below since both share the "Incorrect" prefix.
+        if (/incorrect\s+car/i.test(text)) {
+            return S.NOT_ALLOWED;
+        }
         // Race already started: tried to join too late
         if (/incorrect\s+race/i.test(text)) {
             return S.ALREADY_STARTED;
@@ -1518,7 +1533,7 @@
 
         // Blank stats in all menu/error/quiet statuses
         const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.TIMED_OUT,
-            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS];
+            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED];
         if (blankStatsStatuses.indexOf(newStatus) === -1) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
@@ -1597,7 +1612,8 @@
             [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' },
             [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
-            [S.NOT_ENOUGH_FUNDS]: { label: 'INSUFFICIENT FUNDS', cls: 'st-nofunds' }
+            [S.NOT_ENOUGH_FUNDS]: { label: 'INSUFFICIENT FUNDS', cls: 'st-nofunds' },
+            [S.NOT_ALLOWED]: { label: 'NOT ALLOWED', cls: 'st-notallowed' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1614,6 +1630,7 @@
         if (state.status === S.ALREADY_STARTED) { el.innerHTML = '<div class="tc-lb-empty">Race already started.</div>'; return; }
         if (state.status === S.RACE_FULL) { el.innerHTML = '<div class="tc-lb-empty">Race full.</div>'; return; }
         if (state.status === S.NOT_ENOUGH_FUNDS) { el.innerHTML = '<div class="tc-lb-empty">Insufficient funds.</div>'; return; }
+        if (state.status === S.NOT_ALLOWED) { el.innerHTML = '<div class="tc-lb-empty">Incorrect car.</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1752,7 +1769,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
@@ -1873,7 +1890,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         </div>
       </div>
       <div id="tc-rc-feed-col">
-        <div class="tc-col-hdr" id="tc-col-hdr-commentary">COMMENTARY <span id="tc-col-hdr-arrow">&#8595;</span></div>
+        <div class="tc-col-hdr" id="tc-col-hdr-commentary">COMMENTARY <span id="tc-col-hdr-arrow">&#8593;</span></div>
         <div id="tc-feed-inner"></div>
       </div>
     </div>
@@ -1888,7 +1905,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     <div class="tc-set-divider"></div>
     <div class="tc-set-row">
       <span class="tc-set-lbl">Commentary scroll</span>
-      <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8595; Down</button>
+      <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8593; Up</button>
     </div>
     <div class="tc-set-hint">
       Down: newest messages appear at the bottom, older scroll up.<br>
