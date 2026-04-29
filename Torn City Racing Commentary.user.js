@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.48.0
+// @version      2.49.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.48.0';
+    const SCRIPT_VERSION = '2.49.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v58';
+    const STORAGE_KEY = 'tc_racecomm_v59';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -97,7 +97,7 @@
         UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
         NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED',
-        TORN_DOWN: 'TORN_DOWN'
+        TORN_DOWN: 'TORN_DOWN', IN_GARAGE: 'IN_GARAGE'
     };
 
     // Statuses where commentary is suppressed entirely after the entry message(s).
@@ -106,7 +106,7 @@
     const QUIET_STATUSES = [
         'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT',
         'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED',
-        'TORN_DOWN'
+        'TORN_DOWN', 'IN_GARAGE'
     ];
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
@@ -554,7 +554,8 @@
     // be reversed when the user has set scrollDirection to 'up'.
     const FORCE_TOP_DOWN_STATUSES = [
         'HOSPITAL', 'TIMED_OUT', 'ALREADY_STARTED', 'NOT_ALLOWED',
-        'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'TORN_DOWN', 'UNAVAILABLE'
+        'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'TORN_DOWN', 'UNAVAILABLE',
+        'IN_GARAGE'
     ];
     function effectiveScrollDirection () {
         if (FORCE_TOP_DOWN_STATUSES.indexOf(state.status) !== -1) return 'down';
@@ -1091,6 +1092,10 @@
             clearFeed();
             pushLine('Please wait.', 'status');
         }
+        if (newSt === S.IN_GARAGE && oldSt !== S.IN_GARAGE) {
+            clearFeed();
+            pushLine('Lots of modification available here.', 'status');
+        }
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
@@ -1476,6 +1481,11 @@
         if (/you\s+don'?t\s+have\s+enough\s+money/i.test(text)) {
             return S.NOT_ENOUGH_FUNDS;
         }
+        // In garage: player is browsing the racing modifications page.
+        // Detected by the garage's racing-points header text.
+        if (/you\s+have\s+\d[\d,]*\s+racing\s+points\s+available/i.test(text)) {
+            return S.IN_GARAGE;
+        }
         // Travel block: when the player is flying or abroad, Torn shows
         // "This page is unavailable while you're traveling." — racing isn't
         // possible during travel so return a dedicated UNAVAILABLE status.
@@ -1607,7 +1617,8 @@
 
         // Blank stats in all menu/error/quiet statuses
         const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.TIMED_OUT,
-            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED, S.TORN_DOWN];
+            S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED,
+            S.TORN_DOWN, S.IN_GARAGE];
         if (blankStatsStatuses.indexOf(newStatus) === -1) {
             const ll = scrapeLastLap();
             const cl = scrapeCurrentLap();
@@ -1692,7 +1703,8 @@
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
             [S.NOT_ENOUGH_FUNDS]: { label: 'INSUFFICIENT FUNDS', cls: 'st-nofunds' },
             [S.NOT_ALLOWED]: { label: 'NOT ALLOWED', cls: 'st-notallowed' },
-            [S.TORN_DOWN]: { label: 'RECONNECTING TO RACETRACK', cls: 'st-torndown' }
+            [S.TORN_DOWN]: { label: 'RECONNECTING TO RACETRACK', cls: 'st-torndown' },
+            [S.IN_GARAGE]: { label: 'IN GARAGE', cls: 'st-garage' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
@@ -1711,6 +1723,7 @@
         if (state.status === S.NOT_ENOUGH_FUNDS) { el.innerHTML = '<div class="tc-lb-empty">Insufficient funds.</div>'; return; }
         if (state.status === S.NOT_ALLOWED) { el.innerHTML = '<div class="tc-lb-empty">Incorrect car.</div>'; return; }
         if (state.status === S.TORN_DOWN) { el.innerHTML = '<div class="tc-lb-empty">Reconnecting\u2026</div>'; return; }
+        if (state.status === S.IN_GARAGE) { el.innerHTML = '<div class="tc-lb-empty">In the garage.</div>'; return; }
         const top6 = state.racers.slice(0, 6);
         if (!top6.length) { el.innerHTML = '<div class="tc-lb-empty">Awaiting data\u2026</div>'; return; }
         el.innerHTML = top6.map(function (r, i) {
@@ -1849,7 +1862,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
