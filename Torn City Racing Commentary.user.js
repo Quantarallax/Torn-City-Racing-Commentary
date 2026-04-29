@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.50.0
+// @version      2.51.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.50.0';
+    const SCRIPT_VERSION = '2.51.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v60';
+    const STORAGE_KEY = 'tc_racecomm_v61';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -1575,9 +1575,12 @@
         if (newName) state.playerName = newName;
         if (newTrack) state.track = newTrack;
         // Only update car when we're in an active race context.
-        // While browsing car selection in MENU the scraper can pick up
-        // car list entries and show them incorrectly in the display.
-        if (newCar && newStatus !== S.MENU) state.car = newCar;
+        // While browsing car selection in MENU, or on the modifications/garage,
+        // statistics, or enlisted-cars pages, the scraper can pick up unrelated
+        // car-list entries and show them incorrectly in the display. Freeze the
+        // CAR display on those pages — keep whatever was last shown.
+        const carFrozenStatuses = [S.MENU, S.IN_GARAGE, S.STATISTICS, S.ENLISTED];
+        if (newCar && carFrozenStatuses.indexOf(newStatus) === -1) state.car = newCar;
 
         if (posData) {
             state.position = posData.pos;
