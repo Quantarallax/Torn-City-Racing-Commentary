@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.52.0
+// @version      2.53.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.52.0';
+    const SCRIPT_VERSION = '2.53.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v62';
+    const STORAGE_KEY = 'tc_racecomm_v63';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -1477,8 +1477,12 @@
         if (/torn\s+is\s+currently\s+down/i.test(text)) {
             return S.TORN_DOWN;
         }
-        // Hospital: player can't race at all while in hospital
-        if (/you\s+cannot\s+do\s+this\s+while\s+in\s+hospital/i.test(text)) {
+        // Hospital: player can't race at all while in hospital.
+        // Torn currently shows "This page is not available while in hospital."
+        // Older versions of the page showed "You cannot do this while in hospital."
+        // Match the common stable substring "while in hospital" which appears in
+        // both forms and is unique enough not to false-positive elsewhere.
+        if (/while\s+in\s+hospital/i.test(text)) {
             return S.HOSPITAL;
         }
         // Race timed out: a previous race attempt failed to start
