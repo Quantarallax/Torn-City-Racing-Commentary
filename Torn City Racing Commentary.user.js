@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.51.0
+// @version      2.52.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.51.0';
+    const SCRIPT_VERSION = '2.52.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v61';
+    const STORAGE_KEY = 'tc_racecomm_v62';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -943,6 +943,17 @@
         resetTimers();
         // Always reset the WAITING confirmation counter on any status transition
         waitingSeenCount = 0;
+
+        // Per spec: when leaving IN_GARAGE / TORN_DOWN / STATISTICS / ENLISTED,
+        // clear commentary on exit so the quiet-status messages don't linger
+        // alongside whatever the new status produces. Most new-status entry
+        // handlers already call clearFeed(), but this exit-clear runs first
+        // and unconditionally — defence-in-depth in case a future entry handler
+        // is added that doesn't clear.
+        const CLEAR_ON_EXIT_FROM = [S.IN_GARAGE, S.TORN_DOWN, S.STATISTICS, S.ENLISTED];
+        if (oldSt && CLEAR_ON_EXIT_FROM.indexOf(oldSt) !== -1 && oldSt !== newSt) {
+            clearFeed();
+        }
 
         // Capture existing racers BEFORE any clear, so we can report paddock size
         const racersBeforeClear = state.racers.slice();
