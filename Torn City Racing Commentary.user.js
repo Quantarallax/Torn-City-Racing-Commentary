@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.54.0
+// @version      2.55.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.54.0';
+    const SCRIPT_VERSION = '2.55.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v64';
+    const STORAGE_KEY = 'tc_racecomm_v65';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -662,16 +662,20 @@
                         // Per spec: each new arrival in PRE_LAUNCH gets the full
                         // 3-line sequence with 1-second pauses between lines.
                         const arrivalName = r.name;
-                        pushLine(arrivalName + ' just joined in position ' + posStr + '.', 'status', ICON.join);
+                        try {
+                            pushLine(arrivalName + ' just joined in position ' + posStr + '.', 'status', ICON.join);
+                        } catch (e) { console.error('[TC RC] pre-launch line 1:', e); }
                         setTimeout(function () {
-                            // Re-check status — if we've left PRE_LAUNCH (race
-                            // started, etc.) skip the trailing lines.
-                            if (currentStatus !== S.PRE_LAUNCH) return;
-                            pushLine(arrivalName + ' does a last minute check.', 'status', ICON.join);
+                            try {
+                                if (currentStatus !== S.PRE_LAUNCH) return;
+                                pushLine(arrivalName + ' does a last minute check.', 'status', ICON.join);
+                            } catch (e) { console.error('[TC RC] pre-launch line 2:', e); }
                         }, 1000);
                         setTimeout(function () {
-                            if (currentStatus !== S.PRE_LAUNCH) return;
-                            pushLine(arrivalName + ' looks fidgety behind the wheel.', 'status', ICON.join);
+                            try {
+                                if (currentStatus !== S.PRE_LAUNCH) return;
+                                pushLine(arrivalName + ' looks fidgety behind the wheel.', 'status', ICON.join);
+                            } catch (e) { console.error('[TC RC] pre-launch line 3:', e); }
                         }, 2000);
                     }
                 }
@@ -1251,14 +1255,18 @@
     // "Race will Start in X" pattern first, then the COUNTDOWN long-form
     // duration pattern. Returns null if neither is found.
     function scrapeCountdown () {
-        const text = getPageText();
-        // PRE-LAUNCH: "Race will Start in 1 minute 48 seconds" / "...48 seconds"
-        const m1 = text.match(/Race\s+will\s+Start\s+in\s+([^.\n\r]+?seconds?)/i);
-        if (m1) return m1[1].trim();
-        // COUNTDOWN: "Docks - 100 laps - 1 hours, 17 minutes, 10 seconds"
-        const m2 = text.match(/-\s+\d+\s+laps?\s+-\s+([^.\n\r]+?seconds?)/i);
-        if (m2) return m2[1].trim();
-        return null;
+        try {
+            const text = getPageText();
+            // PRE-LAUNCH: "Race will Start in 1 minute 48 seconds" / "...48 seconds"
+            const m1 = text.match(/Race\s+will\s+Start\s+in\s+([^.\n\r]+?seconds?)/i);
+            if (m1) return m1[1].trim();
+            // COUNTDOWN: "Docks - 100 laps - 1 hours, 17 minutes, 10 seconds"
+            const m2 = text.match(/-\s+\d+\s+laps?\s+-\s+([^.\n\r]+?seconds?)/i);
+            if (m2) return m2[1].trim();
+            return null;
+        } catch (_) {
+            return null;
+        }
     }
 
     function scrapeTrack () {
@@ -1596,11 +1604,13 @@
                 && !NAME_BLACKLIST.test(state.playerName)) {
                 if (rowName === state.playerName) return S.CRASHED;
                 if (!rowName) {
-                    const liText = (li.textContent || '');
-                    // Use word-boundary match so "Sanxion" doesn't match "Sanxion42"
-                    const re = new RegExp('\\b' + state.playerName
-                        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
-                    if (re.test(liText)) return S.CRASHED;
+                    try {
+                        const liText = (li.textContent || '');
+                        // Use word-boundary match so "Sanxion" doesn't match "Sanxion42"
+                        const re = new RegExp('\\b' + state.playerName
+                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+                        if (re.test(liText)) return S.CRASHED;
+                    } catch (_) {}
                 }
             }
         }
@@ -1937,8 +1947,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700&display=swap');
 #tc-rc-hud{--c-gold:#f5c030;--c-blue:#6ec4ff;--c-green:#4ee87a;--c-purple:#d090ff;--c-orange:#ffaa50;--c-red:#ff6666;--c-white:#f0f4fa;--c-mid:#b0c0d0;--c-muted:#8a9db8;--c-dim:#6a7d94;--c-bg:#07090f;--c-bg2:#060810;--c-border:#202840;--c-border2:#181e30;}
 #tc-rc-hud{position:fixed;top:4vh;right:18px;width:340px;height:75vh;min-width:260px;max-width:520px;background:var(--c-bg);border:1px solid var(--c-border);border-top:3px solid var(--c-gold);border-radius:5px;box-shadow:0 20px 70px rgba(0,0,0,.92);font-family:'Barlow Condensed',sans-serif;color:var(--c-mid);z-index:999999;display:flex;flex-direction:column;overflow:hidden;resize:both;user-select:none;}
-#tc-rc-hud.tc-fixed{position:relative;top:auto;right:auto;left:auto;width:100%;max-width:100%;height:auto;min-height:60vh;border-radius:0;box-shadow:none;resize:vertical;z-index:10;}
-#tc-rc-drag{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 5px;background:linear-gradient(90deg,#0c0f1c 0%,#111628 100%);border-bottom:1px solid var(--c-border);cursor:grab;flex-shrink:0;}
-#tc-rc-drag:active{cursor:grabbing;}
-#tc-rc-hud.tc-fixed #tc-rc-drag{cursor:default;}
-.tc-title-text{font-family:'Orbitron',monospace;font-size:9px;font-
+#tc-rc-hud.tc-fixed{position:relative;top:auto;right:auto;left:auto;width:100%;max-width:100%;height:auto;min-height:60vh;border-radiu
