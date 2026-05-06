@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.53.0
+// @version      2.54.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.53.0';
+    const SCRIPT_VERSION = '2.54.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v63';
+    const STORAGE_KEY = 'tc_racecomm_v64';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -125,11 +125,17 @@
                 '{player} honks their horn in frustration.',
                 '{player} revs their engine, upping the temperature.',
                 'Fumes gather around the cluster of vehicles.',
+                'One of the cars bursts into flames. And is quickly put out.',
                 'Oh, this will be interesting, I\'m sure.',
+                'Records on {track} are nigh on impossible to beat nowadays.',
                 'We suspect the no weapons rule will not be followed.',
                 'Tick tick tick, *boom* Hopefully.',
                 'Excitement rings through the crowd.',
-                'Crowds are now gathering at all the best vantage points.'
+                'Crowds are now gathering at all the best vantage points.',
+                "Official confirmation there's {countdown} left until they release the beasts.",
+                'Dark clouds move overhead.',
+                '{p2} checks their weapons.',
+                '{track} can be daunting in amateur hands.'
             ],
             player: [
                 '{player} has settled into {pos} and holds their nerve.',
@@ -478,7 +484,8 @@
             p2: state.racers[1] ? state.racers[1].name : '—',
             p3: state.racers[2] ? state.racers[2].name : '—',
             last: state.racers.length > 0 ? state.racers[state.racers.length - 1].name : '—',
-            total: String(state.racerCount || state.racers.length || '?')
+            total: String(state.racerCount || state.racers.length || '?'),
+            countdown: scrapeCountdown() || 'a few moments'
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
             // If a template token is unknown, return the original {token}
@@ -652,14 +659,20 @@
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
                     } else if (currentStatus === S.PRE_LAUNCH) {
-                        // Rotate between three pre-launch arrival lines
-                        const preLaunchLines = [
-                            r.name + ' just joined in position ' + posStr + '.',
-                            r.name + ' does a last minute check.',
-                            r.name + ' looks fidgety behind the wheel.'
-                        ];
-                        const choice = preLaunchLines[Math.floor(Math.random() * preLaunchLines.length)];
-                        pushLine(choice, 'status', ICON.join);
+                        // Per spec: each new arrival in PRE_LAUNCH gets the full
+                        // 3-line sequence with 1-second pauses between lines.
+                        const arrivalName = r.name;
+                        pushLine(arrivalName + ' just joined in position ' + posStr + '.', 'status', ICON.join);
+                        setTimeout(function () {
+                            // Re-check status — if we've left PRE_LAUNCH (race
+                            // started, etc.) skip the trailing lines.
+                            if (currentStatus !== S.PRE_LAUNCH) return;
+                            pushLine(arrivalName + ' does a last minute check.', 'status', ICON.join);
+                        }, 1000);
+                        setTimeout(function () {
+                            if (currentStatus !== S.PRE_LAUNCH) return;
+                            pushLine(arrivalName + ' looks fidgety behind the wheel.', 'status', ICON.join);
+                        }, 2000);
                     }
                 }
             }
@@ -881,8 +894,12 @@
         });
 
         candidates.forEach(function (crashEl) {
-            // Walk up to the enclosing <li> (or the nearest driver row)
-            const li = crashEl.closest('li') ||
+            // Per spec, walk up to the enclosing racer row. Each row uses the
+            // class pattern lbr-{id}; fall back to any <li>/driver/racer wrapper
+            // if Torn's class scheme has shifted.
+            const lbrRow = crashEl.closest('li[class*="lbr-"], li[class*="lbr_"]');
+            const li = lbrRow ||
+                       crashEl.closest('li') ||
                        crashEl.closest('[class*="driver"]') ||
                        crashEl.closest('[class*="racer"]');
             if (!li) return;
@@ -895,12 +912,16 @@
             // marker there describes a past race, not a live one.
             if (looksLikeEventsRow(li)) return;
 
-            // Extract the racer name from common patterns
+            // Extract the racer name. Prefer the spec's structure
+            // <li class="name"><span>name</span></li>; fall back to broader patterns.
             let name = '';
             const nameSelectors = [
+                'li.name > span',
+                'li[class*="name"] > span',
                 'span.name',
                 'span[class*="name"]',
                 'a[class*="name"]',
+                '[class*="name"] > span',
                 '[class*="name"] span',
                 'li.name',
                 'li[class*="name"]',
@@ -1225,6 +1246,21 @@
         return candidate;
     }
 
+    // Pulls a human-readable countdown / race-time-remaining string from the
+    // page text. Used by the {countdown} template token. Tries the PRE-LAUNCH
+    // "Race will Start in X" pattern first, then the COUNTDOWN long-form
+    // duration pattern. Returns null if neither is found.
+    function scrapeCountdown () {
+        const text = getPageText();
+        // PRE-LAUNCH: "Race will Start in 1 minute 48 seconds" / "...48 seconds"
+        const m1 = text.match(/Race\s+will\s+Start\s+in\s+([^.\n\r]+?seconds?)/i);
+        if (m1) return m1[1].trim();
+        // COUNTDOWN: "Docks - 100 laps - 1 hours, 17 minutes, 10 seconds"
+        const m2 = text.match(/-\s+\d+\s+laps?\s+-\s+([^.\n\r]+?seconds?)/i);
+        if (m2) return m2[1].trim();
+        return null;
+    }
+
     function scrapeTrack () {
         const m = getPageText().match(/([A-Za-z][A-Za-z0-9 '\-]*?)\s+-\s+\d+\s+laps?\s+-/);
         return m ? m[1].trim() : null;
@@ -1525,12 +1561,13 @@
         if (/this\s+page\s+is\s+unavailable\s+while\s+you'?re\s+travel(l)?ing/i.test(text)) {
             return S.UNAVAILABLE;
         }
-        // CRASHED detection: rely ONLY on Torn's structural crash UI markers
-        // attached to real driver rows. The previous text-based check
-        // ("crashed" in page text) was triggered falsely when an Events-menu
-        // entry containing the word "crashed" scrolled into view, leaving the
-        // script stuck in CRASHED mid-race. We now require an actual crash
-        // marker element that is NOT inside Torn's top-bar dropdowns.
+        // CRASHED detection (player): per spec, walk the precise DOM hierarchy.
+        // Each racer row is an <li class="lbr-{id}"> containing an
+        // <li class="status-wrap"> with a <div class="status crash"> when that
+        // racer has crashed. The racer's name lives in a sibling
+        // <li class="name"><span>{playername}</span></li> within the same lbr- row.
+        // To activate CRASHED for the player: find a crash marker, walk up to
+        // the enclosing lbr- row, then check the .name span matches the player.
         const crashMarkers = document.querySelectorAll(
             'div.status.crash, div[class*="status"][class*="crash"], ' +
             '[class*="statusCrash"], [class*="crashed"], [class*="wrecked"]'
@@ -1540,14 +1577,31 @@
             // Skip our own HUD and Torn's notification dropdowns
             if (m.closest('#tc-rc-hud')) continue;
             if (isInsideTornMenu(m)) continue;
-            // Confirm it's attached to (or near) the player's own row by
-            // checking the enclosing driver row's text contains the player name.
-            const li = m.closest('li') || m.closest('[class*="driver"]') || m.closest('[class*="racer"]');
+            // Walk up to the enclosing racer row. Try the spec's lbr- pattern
+            // first, then fall back to any <li> ancestor.
+            const lbrRow = m.closest('li[class*="lbr-"], li[class*="lbr_"]');
+            const li = lbrRow || m.closest('li') ||
+                       m.closest('[class*="driver"]') || m.closest('[class*="racer"]');
             if (!li) continue;
             if (looksLikeEventsRow(li)) continue;
-            const liText = (li.textContent || '');
-            if (state.playerName && state.playerName !== '—' && liText.indexOf(state.playerName) !== -1) {
-                return S.CRASHED;
+            // Try to extract the racer's name from the same row using the
+            // spec's nested structure: <li class="name"><span>...</span></li>.
+            // Fall back to any element with class "name" containing a span.
+            const nameSpan = li.querySelector('li.name > span, li[class*="name"] > span, [class*="name"] > span');
+            const rowName = nameSpan ? nameSpan.textContent.trim() : '';
+            // Activate CRASHED if the row's name matches the player. Fall back
+            // to a substring check on the row's full text if the structured
+            // selector didn't find a name (defends against Torn DOM tweaks).
+            if (state.playerName && state.playerName !== '—'
+                && !NAME_BLACKLIST.test(state.playerName)) {
+                if (rowName === state.playerName) return S.CRASHED;
+                if (!rowName) {
+                    const liText = (li.textContent || '');
+                    // Use word-boundary match so "Sanxion" doesn't match "Sanxion42"
+                    const re = new RegExp('\\b' + state.playerName
+                        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+                    if (re.test(liText)) return S.CRASHED;
+                }
             }
         }
         if (/race\s+finished/i.test(text) || /you\s+finished\s+in\s+\d/i.test(text) || document.querySelector('[class*="raceEnd"], [class*="raceFinished"]')) return S.ENDED;
@@ -1887,297 +1941,4 @@
 #tc-rc-drag{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 5px;background:linear-gradient(90deg,#0c0f1c 0%,#111628 100%);border-bottom:1px solid var(--c-border);cursor:grab;flex-shrink:0;}
 #tc-rc-drag:active{cursor:grabbing;}
 #tc-rc-hud.tc-fixed #tc-rc-drag{cursor:default;}
-.tc-title-text{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-gold);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.tc-hdr-btns{display:flex;gap:4px;flex-shrink:0;margin-left:8px;}
-.tc-hdr-btns button{background:rgba(255,255,255,.05);border:1px solid #2a3050;color:var(--c-muted);width:20px;height:20px;border-radius:3px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .15s,color .15s,border-color .15s;}
-.tc-hdr-btns button:hover{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
-#tc-rc-body{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
-#tc-rc-main{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
-#tc-rc-infobar{display:flex;align-items:stretch;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
-.tc-ib-cell{flex:1;display:flex;flex-direction:column;align-items:center;padding:5px 4px 4px;min-width:0;}
-.tc-ib-sep{width:1px;background:var(--c-border2);margin:4px 0;flex-shrink:0;}
-.tc-ib-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;margin-bottom:2px;white-space:nowrap;}
-.tc-ib-val{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--c-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-.tc-ib-val.tc-focus-other{color:var(--c-blue);}
-#tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
-.tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
-#tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
-.tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
-.tc-fl a.tc-link:hover{color:var(--c-gold);}
-#tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
-#tc-rc-lb-col{position:absolute;top:0;left:0;bottom:0;width:142px;border-right:1px solid var(--c-border2);background:var(--c-bg2);display:flex;flex-direction:column;overflow:hidden;z-index:2;}
-#tc-rc-lb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:3px 0;min-height:0;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
-#tc-rc-stats{flex-shrink:0;border-top:1px solid var(--c-border2);padding:5px 6px 7px;background:var(--c-bg2);}
-.tc-stats-row1{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:3px;}
-.tc-stats-row1 .tc-stat-group{display:flex;align-items:baseline;gap:3px;}
-.tc-stats-row2{display:flex;align-items:center;justify-content:center;gap:4px;}
-.tc-stat-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.1em;white-space:nowrap;}
-.tc-stat-val{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--c-white);text-align:right;white-space:nowrap;}
-#tc-stat-comp{font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:700;color:var(--c-white);text-align:center;}
-.tc-comp-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.1em;white-space:nowrap;}
-.tc-lb-empty{font-size:11px;color:var(--c-dim);padding:8px;font-style:italic;line-height:1.5;}
-.tc-lb-row{display:flex;align-items:center;gap:4px;padding:5px 6px;border-bottom:1px solid #0d1020;font-size:12px;font-weight:600;}
-.tc-lb-row.lb-me{background:rgba(245,192,48,.09);border-left:2px solid var(--c-gold);}
-.tc-lb-pos{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-muted);min-width:20px;flex-shrink:0;}
-.lb-p1{color:#ffd040;}.lb-p2{color:#d0dce8;}.lb-p3{color:#e8a050;}
-.lb-px{color:var(--c-muted);}
-.tc-lb-row.lb-lower{font-size:11px;padding:3px 6px;}
-.tc-lb-row.lb-lower .tc-lb-pos{font-size:8px;}
-.tc-lb-row.lb-lower .tc-lb-name{color:var(--c-muted);font-weight:500;}
-.tc-lb-spacer{display:inline-block;width:14px;flex-shrink:0;}
-.tc-trophy{font-size:14px;flex-shrink:0;line-height:1;}
-.tp-gold{filter:drop-shadow(0 0 4px rgba(255,208,64,.8));}.tp-silver{filter:drop-shadow(0 0 4px rgba(208,220,232,.7));}.tp-bronze{filter:drop-shadow(0 0 4px rgba(232,160,80,.7));}
-.tc-lb-name{color:var(--c-mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
-.tc-lb-row.lb-me .tc-lb-name{color:#ffe060;}
-a.tc-link{color:inherit;text-decoration:none;transition:color .15s;}
-a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
-#tc-rc-feed-col{position:absolute;top:0;left:143px;right:0;bottom:0;display:flex;flex-direction:column;overflow:hidden;}
-.tc-col-hdr{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;padding:5px 8px 4px;border-bottom:1px solid var(--c-border2);flex-shrink:0;white-space:nowrap;}
-#tc-col-hdr-arrow{color:var(--c-gold);margin-left:4px;font-size:9px;letter-spacing:0;}
-#tc-feed-inner{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:10px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
-.tc-fl{display:flex;align-items:flex-start;gap:5px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:400;line-height:1.5;padding:3px 10px;border-left:2px solid transparent;color:var(--c-muted);word-break:break-word;flex-shrink:0;width:100%;box-sizing:border-box;transition:color .25s linear;}
-.tc-fl.tc-fl-new,.tc-fl.tc-fl-new .tc-fl-text{color:#ffffff !important;transition:none;}
-.tc-fl-text{flex:1;min-width:0;transition:color .25s linear;}
-.tc-icon{flex-shrink:0;display:inline-flex;align-items:center;margin-top:2px;}
-.fl-status{color:var(--c-white);font-weight:700;font-size:13.5px;border-left-color:var(--c-gold);background:rgba(245,192,48,.07);padding-top:4px;padding-bottom:4px;margin:1px 0;}
-.fl-ambient{color:var(--c-dim);font-style:italic;}
-.fl-player{color:#ffe060;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);}
-.fl-position{color:var(--c-blue);border-left-color:#2870cc;background:rgba(110,196,255,.07);}
-.fl-finish{color:var(--c-purple);font-weight:700;font-size:13.5px;border-left-color:#a855f7;background:rgba(208,144,255,.07);margin:1px 0;}
-.fl-outro{color:var(--c-gold);font-weight:600;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);padding-top:5px;padding-bottom:5px;}
-.fl-crash{color:var(--c-red);font-weight:700;border-left-color:var(--c-red);background:rgba(255,102,102,.08);}
-.fl-waiting{color:var(--c-orange);font-style:italic;border-left-color:var(--c-orange);background:rgba(255,170,80,.07);}
-#tc-rc-footer{display:flex;align-items:center;gap:5px;padding:4px 10px;background:var(--c-bg2);border-top:1px solid var(--c-border2);flex-shrink:0;flex-wrap:wrap;}
-.tc-foot-btn{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;background:rgba(255,255,255,.04);border:1px solid var(--c-border);color:var(--c-dim);padding:2px 9px;border-radius:3px;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;transition:background .15s,color .15s,border-color .15s;white-space:nowrap;}
-.tc-foot-btn:hover{background:rgba(245,192,48,.12);border-color:var(--c-gold);color:var(--c-gold);}
-.tc-foot-btn.tc-btn-active{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
-#tc-live-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--c-green);flex-shrink:0;animation:tc-pulse 2.5s ease-in-out infinite;}
-@keyframes tc-pulse{0%,100%{opacity:1;}50%{opacity:.15;}}
-#tc-rc-settings{display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;padding:20px 18px;flex:1;overflow-y:auto;}
-.tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;width:100%;}
-.tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;width:100%;box-sizing:border-box;}
-.tc-set-divider{width:100%;height:1px;background:var(--c-border2);margin:14px 0 6px;}
-.tc-set-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:600;color:var(--c-mid);letter-spacing:.04em;}
-.tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;width:100%;text-align:left;}
-.tc-cred-flag{font-size:36px;line-height:1;}
-.tc-cred-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;line-height:1.3;}
-.tc-cred-ver{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--c-dim);letter-spacing:.08em;}
-.tc-cred-by{font-size:14px;font-weight:600;color:var(--c-mid);}
-.tc-cred-by strong{color:var(--c-gold);}
-.tc-cred-plink{color:var(--c-blue);font-size:12px;}
-.tc-cred-plink:hover{text-decoration:underline;}
-.tc-cred-msg{font-size:12px;color:var(--c-muted);line-height:1.7;margin-top:4px;}
-#tc-rc-lb-list::-webkit-scrollbar,#tc-feed-inner::-webkit-scrollbar{width:4px;}
-#tc-rc-lb-list::-webkit-scrollbar-track,#tc-feed-inner::-webkit-scrollbar-track{background:transparent;}
-#tc-rc-lb-list::-webkit-scrollbar-thumb,#tc-feed-inner::-webkit-scrollbar-thumb{background:var(--c-border);border-radius:2px;}
-#tc-feed-inner::-webkit-scrollbar-thumb:hover{background:var(--c-muted);}
-`;
-        const styleEl = document.createElement('style');
-        styleEl.id = 'tc-rc-css';
-        styleEl.textContent = css;
-        document.head.appendChild(styleEl);
-    }
-
-    // ─── Build HUD ────────────────────────────────────────────────────────────────
-    function buildHUD () {
-        if (document.getElementById('tc-rc-hud')) return;
-        injectCSS();
-        const hud = document.createElement('div');
-        hud.id = 'tc-rc-hud';
-        hud.innerHTML = `
-<div id="tc-rc-drag">
-  <span class="tc-title-text">&#127937; ${escH(SCRIPT_NAME)}</span>
-  <div class="tc-hdr-btns">
-    <button id="tc-rc-min" title="Minimise">&#9650;</button>
-  </div>
-</div>
-<div id="tc-rc-body">
-  <div id="tc-rc-main">
-    <div id="tc-rc-infobar">
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">DRIVER</div><div class="tc-ib-val" id="tc-ib-name">&#8212;</div></div>
-      <div class="tc-ib-sep"></div>
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">TRACK</div><div class="tc-ib-val" id="tc-ib-track">&#8212;</div></div>
-      <div class="tc-ib-sep"></div>
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">CAR</div><div class="tc-ib-val" id="tc-ib-car">&#8212;</div></div>
-      <div class="tc-ib-sep"></div>
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">POS</div><div class="tc-ib-val" id="tc-ib-pos">&#8212;</div></div>
-    </div>
-    <div id="tc-rc-status-row">
-      <span class="tc-st-lbl">STATUS</span>
-      <span id="tc-rc-status-val" class="st-menu">MENU</span>
-    </div>
-    <div id="tc-rc-cols">
-      <div id="tc-rc-lb-col">
-        <div class="tc-col-hdr">TOP 6</div>
-        <div id="tc-rc-lb-list"></div>
-        <div id="tc-rc-stats">
-          <div class="tc-stats-row1">
-            <div class="tc-stat-group"><span class="tc-stat-lbl">LAP</span><span class="tc-stat-val" id="tc-stat-lap">&#8212;</span></div>
-            <div class="tc-stat-group"><span class="tc-stat-lbl">LAST</span><span class="tc-stat-val" id="tc-stat-last">&#8212;</span></div>
-          </div>
-          <div class="tc-stats-row2">
-            <span class="tc-comp-lbl">COMPLETED</span>
-            <span id="tc-stat-comp">&#8212;</span>
-          </div>
-        </div>
-      </div>
-      <div id="tc-rc-feed-col">
-        <div class="tc-col-hdr" id="tc-col-hdr-commentary">COMMENTARY <span id="tc-col-hdr-arrow">&#8593;</span></div>
-        <div id="tc-feed-inner"></div>
-      </div>
-    </div>
-  </div>
-  <div id="tc-rc-settings">
-    <div class="tc-cred-flag">&#127937;</div>
-    <div class="tc-cred-title">${escH(SCRIPT_NAME)}</div>
-    <div class="tc-cred-ver">Version ${escH(SCRIPT_VERSION)}</div>
-    <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
-    <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
-    <div class="tc-cred-msg">Bugs &amp; feedback welcome!<br>Find me in-game on Torn City.</div>
-    <div class="tc-set-divider"></div>
-    <div class="tc-set-row">
-      <span class="tc-set-lbl">Commentary scroll</span>
-      <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8593; Up</button>
-    </div>
-    <div class="tc-set-hint">
-      Down: newest messages appear at the bottom, older scroll up.<br>
-      Up: newest messages appear at the top, older scroll down.
-    </div>
-  </div>
-</div>
-<div id="tc-rc-footer">
-  <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
-  <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
-  <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
-  <button id="tc-btn-fix" class="tc-foot-btn">&#8862; Fix</button>
-  <span id="tc-live-dot"></span>
-</div>`;
-        document.body.appendChild(hud);
-        // Restore persisted window position and size (floating mode only)
-        if (!state.windowFixed) {
-            if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
-            if (state.windowTop) { hud.style.top = state.windowTop; }
-            if (state.windowWidth) { hud.style.width = state.windowWidth; }
-            if (state.windowHeight) { hud.style.height = state.windowHeight; }
-        }
-        makeDraggable(hud, document.getElementById('tc-rc-drag'));
-        document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
-        document.getElementById('tc-btn-settings').addEventListener('click', function () {
-            document.getElementById('tc-rc-main').style.display = 'none';
-            document.getElementById('tc-rc-settings').style.display = 'flex';
-            document.getElementById('tc-btn-settings').style.display = 'none';
-            document.getElementById('tc-btn-back').style.display = '';
-            updateScrollDirBtn();
-        });
-        document.getElementById('tc-btn-back').addEventListener('click', function () {
-            document.getElementById('tc-rc-settings').style.display = 'none';
-            document.getElementById('tc-rc-main').style.display = '';
-            document.getElementById('tc-btn-back').style.display = 'none';
-            document.getElementById('tc-btn-settings').style.display = '';
-        });
-        document.getElementById('tc-btn-scroll-dir').addEventListener('click', function () {
-            state.scrollDirection = state.scrollDirection === 'up' ? 'down' : 'up';
-            // Per spec: when scroll direction changes, clear the commentary window.
-            clearFeed();
-            updateScrollDirBtn();
-            saveState();
-        });
-        document.getElementById('tc-btn-pause').addEventListener('click', function () {
-            commentaryPaused = !commentaryPaused;
-            // Show a status message confirming the toggle. Status messages always
-            // bypass the pause filter so the user always sees this feedback.
-            if (commentaryPaused) {
-                pushLine('Commentary paused.', 'status');
-            } else {
-                pushLine('Commentary resumed.', 'status');
-            }
-            updatePauseBtn();
-        });
-        document.getElementById('tc-btn-fix').addEventListener('click', function () {
-            state.windowFixed = !state.windowFixed;
-            updateFixBtn();
-            saveState();
-        });
-        updatePauseBtn();
-        updateFixBtn();
-        if (typeof ResizeObserver !== 'undefined') {
-            let lastSavedW = '', lastSavedH = '';
-            const ro = new ResizeObserver(function () {
-                const el = getFeedEl();
-                if (!el) return;
-                if (state.scrollDirection === 'up') {
-                    if (el.scrollTop < 80) el.scrollTop = 0;
-                } else {
-                    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                    if (nearBottom) el.scrollTop = el.scrollHeight;
-                }
-                // Persist resized HUD dimensions when the user manually resizes.
-                // Only meaningful in floating mode; in fixed mode the HUD width
-                // is forced to 100% via CSS so we skip that case.
-                if (!state.windowFixed) {
-                    const r = hud.getBoundingClientRect();
-                    const w = Math.round(r.width) + 'px';
-                    const h = Math.round(r.height) + 'px';
-                    if (w !== lastSavedW || h !== lastSavedH) {
-                        lastSavedW = w; lastSavedH = h;
-                        state.windowWidth = w;
-                        state.windowHeight = h;
-                        // Don't call saveState() here on every observer fire — the next
-                        // poll() tick will pick it up via its own saveState().
-                    }
-                }
-            });
-            ro.observe(hud);
-            const fi = getFeedEl();
-            if (fi) ro.observe(fi);
-        }
-    }
-
-    // ─── Boot ─────────────────────────────────────────────────────────────────────
-    // Fires a 1x1 invisible tracking pixel to c.statcounter.com by appending a
-    // hidden <img> element to the page body. Waits for the window 'load' event
-    // first (or fires immediately if the page has already loaded) so it behaves
-    // like a standard bottom-of-page analytics snippet. The { once: true } option
-    // on the listener removes it automatically after it fires.
-    function fireStatcounterPixel () {
-        try {
-            const img = document.createElement('img');
-            img.src = 'https://c.statcounter.com/13222568/0/69746abc/1/';
-            img.alt = '';
-            img.width = 1;
-            img.height = 1;
-            img.style.cssText = 'position:absolute;border:0;width:1px;height:1px;opacity:0;pointer-events:none;';
-            (document.body || document.documentElement).appendChild(img);
-        } catch (_) {}
-    }
-
-    if (document.readyState === 'complete') {
-        fireStatcounterPixel();
-    } else {
-        window.addEventListener('load', fireStatcounterPixel, { once: true });
-    }
-
-    function init () {
-        loadState();
-        commentaryPaused = false;
-        buildHUD();
-        rebuildFeed();
-        renderInfoBar();
-        renderStatus();
-        renderLeaderboard();
-        renderRaceStats();
-        updatePauseBtn();
-        updateScrollDirBtn();
-        resetTimers();
-        poll();
-        setInterval(poll, POLL_MS);
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
-})();
+.tc-title-text{font-family:'Orbitron',monospace;font-size:9px;font-
