@@ -1947,4 +1947,319 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700&display=swap');
 #tc-rc-hud{--c-gold:#f5c030;--c-blue:#6ec4ff;--c-green:#4ee87a;--c-purple:#d090ff;--c-orange:#ffaa50;--c-red:#ff6666;--c-white:#f0f4fa;--c-mid:#b0c0d0;--c-muted:#8a9db8;--c-dim:#6a7d94;--c-bg:#07090f;--c-bg2:#060810;--c-border:#202840;--c-border2:#181e30;}
 #tc-rc-hud{position:fixed;top:4vh;right:18px;width:340px;height:75vh;min-width:260px;max-width:520px;background:var(--c-bg);border:1px solid var(--c-border);border-top:3px solid var(--c-gold);border-radius:5px;box-shadow:0 20px 70px rgba(0,0,0,.92);font-family:'Barlow Condensed',sans-serif;color:var(--c-mid);z-index:999999;display:flex;flex-direction:column;overflow:hidden;resize:both;user-select:none;}
-#tc-rc-hud.tc-fixed{position:relative;top:auto;right:auto;left:auto;width:100%;max-width:100%;height:auto;min-height:60vh;border-radiu
+#tc-rc-hud.tc-fixed{position:relative;top:auto;right:auto;left:auto;width:100%;max-width:100%;height:auto;min-height:60vh;border-radius:0;box-shadow:none;resize:vertical;z-index:10;}
+#tc-rc-drag{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 5px;background:linear-gradient(90deg,#0c0f1c 0%,#111628 100%);border-bottom:1px solid var(--c-border);cursor:grab;flex-shrink:0;}
+#tc-rc-drag:active{cursor:grabbing;}
+#tc-rc-hud.tc-fixed #tc-rc-drag{cursor:default;}
+.tc-title-text{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-gold);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tc-hdr-btns{display:flex;gap:4px;flex-shrink:0;margin-left:8px;}
+.tc-hdr-btns button{background:rgba(255,255,255,.05);border:1px solid #2a3050;color:var(--c-muted);width:20px;height:20px;border-radius:3px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .15s,color .15s,border-color .15s;}
+.tc-hdr-btns button:hover{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
+#tc-rc-body{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
+#tc-rc-main{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
+#tc-rc-infobar{display:flex;align-items:stretch;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
+.tc-ib-cell{flex:1;display:flex;flex-direction:column;align-items:center;padding:5px 4px 4px;min-width:0;}
+.tc-ib-sep{width:1px;background:var(--c-border2);margin:4px 0;flex-shrink:0;}
+.tc-ib-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;margin-bottom:2px;white-space:nowrap;}
+.tc-ib-val{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--c-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.tc-ib-val.tc-focus-other{color:var(--c-blue);}
+#tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
+.tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
+#tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
+.tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
+.tc-fl a.tc-link:hover{color:var(--c-gold);}
+#tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
+#tc-rc-lb-col{position:absolute;top:0;left:0;bottom:0;width:142px;border-right:1px solid var(--c-border2);background:var(--c-bg2);display:flex;flex-direction:column;overflow:hidden;z-index:2;}
+#tc-rc-lb-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:3px 0;min-height:0;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
+#tc-rc-stats{flex-shrink:0;border-top:1px solid var(--c-border2);padding:5px 6px 7px;background:var(--c-bg2);}
+.tc-stats-row1{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:3px;}
+.tc-stats-row1 .tc-stat-group{display:flex;align-items:baseline;gap:3px;}
+.tc-stats-row2{display:flex;align-items:center;justify-content:center;gap:4px;}
+.tc-stat-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.1em;white-space:nowrap;}
+.tc-stat-val{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--c-white);text-align:right;white-space:nowrap;}
+#tc-stat-comp{font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:700;color:var(--c-white);text-align:center;}
+.tc-comp-lbl{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.1em;white-space:nowrap;}
+.tc-lb-empty{font-size:11px;color:var(--c-dim);padding:8px;font-style:italic;line-height:1.5;}
+.tc-lb-row{display:flex;align-items:center;gap:4px;padding:5px 6px;border-bottom:1px solid #0d1020;font-size:12px;font-weight:600;}
+.tc-lb-row.lb-me{background:rgba(245,192,48,.09);border-left:2px solid var(--c-gold);}
+.tc-lb-pos{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-muted);min-width:20px;flex-shrink:0;}
+.lb-p1{color:#ffd040;}.lb-p2{color:#d0dce8;}.lb-p3{color:#e8a050;}
+.lb-px{color:var(--c-muted);}
+.tc-lb-row.lb-lower{font-size:11px;padding:3px 6px;}
+.tc-lb-row.lb-lower .tc-lb-pos{font-size:8px;}
+.tc-lb-row.lb-lower .tc-lb-name{color:var(--c-muted);font-weight:500;}
+.tc-lb-spacer{display:inline-block;width:14px;flex-shrink:0;}
+.tc-trophy{font-size:14px;flex-shrink:0;line-height:1;}
+.tp-gold{filter:drop-shadow(0 0 4px rgba(255,208,64,.8));}.tp-silver{filter:drop-shadow(0 0 4px rgba(208,220,232,.7));}.tp-bronze{filter:drop-shadow(0 0 4px rgba(232,160,80,.7));}
+.tc-lb-name{color:var(--c-mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.tc-lb-row.lb-me .tc-lb-name{color:#ffe060;}
+a.tc-link{color:inherit;text-decoration:none;transition:color .15s;}
+a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
+#tc-rc-feed-col{position:absolute;top:0;left:143px;right:0;bottom:0;display:flex;flex-direction:column;overflow:hidden;}
+.tc-col-hdr{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;padding:5px 8px 4px;border-bottom:1px solid var(--c-border2);flex-shrink:0;white-space:nowrap;}
+#tc-col-hdr-arrow{color:var(--c-gold);margin-left:4px;font-size:9px;letter-spacing:0;}
+#tc-feed-inner{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:10px;scrollbar-width:thin;scrollbar-color:var(--c-border) transparent;}
+.tc-fl{display:flex;align-items:flex-start;gap:5px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:400;line-height:1.5;padding:3px 10px;border-left:2px solid transparent;color:var(--c-muted);word-break:break-word;flex-shrink:0;width:100%;box-sizing:border-box;transition:color .25s linear;}
+.tc-fl.tc-fl-new,.tc-fl.tc-fl-new .tc-fl-text{color:#ffffff !important;transition:none;}
+.tc-fl-text{flex:1;min-width:0;transition:color .25s linear;}
+.tc-icon{flex-shrink:0;display:inline-flex;align-items:center;margin-top:2px;}
+.fl-status{color:var(--c-white);font-weight:700;font-size:13.5px;border-left-color:var(--c-gold);background:rgba(245,192,48,.07);padding-top:4px;padding-bottom:4px;margin:1px 0;}
+.fl-ambient{color:var(--c-dim);font-style:italic;}
+.fl-player{color:#ffe060;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);}
+.fl-position{color:var(--c-blue);border-left-color:#2870cc;background:rgba(110,196,255,.07);}
+.fl-finish{color:var(--c-purple);font-weight:700;font-size:13.5px;border-left-color:#a855f7;background:rgba(208,144,255,.07);margin:1px 0;}
+.fl-outro{color:var(--c-gold);font-weight:600;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);padding-top:5px;padding-bottom:5px;}
+.fl-crash{color:var(--c-red);font-weight:700;border-left-color:var(--c-red);background:rgba(255,102,102,.08);}
+.fl-waiting{color:var(--c-orange);font-style:italic;border-left-color:var(--c-orange);background:rgba(255,170,80,.07);}
+#tc-rc-footer{display:flex;align-items:center;gap:5px;padding:4px 10px;background:var(--c-bg2);border-top:1px solid var(--c-border2);flex-shrink:0;flex-wrap:wrap;}
+.tc-foot-btn{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;background:rgba(255,255,255,.04);border:1px solid var(--c-border);color:var(--c-dim);padding:2px 9px;border-radius:3px;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;transition:background .15s,color .15s,border-color .15s;white-space:nowrap;}
+.tc-foot-btn:hover{background:rgba(245,192,48,.12);border-color:var(--c-gold);color:var(--c-gold);}
+.tc-foot-btn.tc-btn-active{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
+#tc-live-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--c-green);flex-shrink:0;animation:tc-pulse 2.5s ease-in-out infinite;}
+@keyframes tc-pulse{0%,100%{opacity:1;}50%{opacity:.15;}}
+#tc-rc-settings{display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;padding:20px 18px;flex:1;overflow-y:auto;}
+.tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;width:100%;}
+.tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;width:100%;box-sizing:border-box;}
+.tc-set-divider{width:100%;height:1px;background:var(--c-border2);margin:14px 0 6px;}
+.tc-set-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:600;color:var(--c-mid);letter-spacing:.04em;}
+.tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;width:100%;text-align:left;}
+.tc-cred-flag{font-size:36px;line-height:1;}
+.tc-cred-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;line-height:1.3;}
+.tc-cred-ver{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--c-dim);letter-spacing:.08em;}
+.tc-cred-by{font-size:14px;font-weight:600;color:var(--c-mid);}
+.tc-cred-by strong{color:var(--c-gold);}
+.tc-cred-plink{color:var(--c-blue);font-size:12px;}
+.tc-cred-plink:hover{text-decoration:underline;}
+.tc-cred-msg{font-size:12px;color:var(--c-muted);line-height:1.7;margin-top:4px;}
+#tc-rc-lb-list::-webkit-scrollbar,#tc-feed-inner::-webkit-scrollbar{width:4px;}
+#tc-rc-lb-list::-webkit-scrollbar-track,#tc-feed-inner::-webkit-scrollbar-track{background:transparent;}
+#tc-rc-lb-list::-webkit-scrollbar-thumb,#tc-feed-inner::-webkit-scrollbar-thumb{background:var(--c-border);border-radius:2px;}
+#tc-feed-inner::-webkit-scrollbar-thumb:hover{background:var(--c-muted);}
+`;
+        const styleEl = document.createElement('style');
+        styleEl.id = 'tc-rc-css';
+        styleEl.textContent = css;
+        document.head.appendChild(styleEl);
+    }
+
+    // ─── Build HUD ────────────────────────────────────────────────────────────────
+    function buildHUD () {
+        if (document.getElementById('tc-rc-hud')) return;
+        injectCSS();
+        const hud = document.createElement('div');
+        hud.id = 'tc-rc-hud';
+        hud.innerHTML = `
+<div id="tc-rc-drag">
+  <span class="tc-title-text">&#127937; ${escH(SCRIPT_NAME)}</span>
+  <div class="tc-hdr-btns">
+    <button id="tc-rc-min" title="Minimise">&#9650;</button>
+  </div>
+</div>
+<div id="tc-rc-body">
+  <div id="tc-rc-main">
+    <div id="tc-rc-infobar">
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">DRIVER</div><div class="tc-ib-val" id="tc-ib-name">&#8212;</div></div>
+      <div class="tc-ib-sep"></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">TRACK</div><div class="tc-ib-val" id="tc-ib-track">&#8212;</div></div>
+      <div class="tc-ib-sep"></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">CAR</div><div class="tc-ib-val" id="tc-ib-car">&#8212;</div></div>
+      <div class="tc-ib-sep"></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">POS</div><div class="tc-ib-val" id="tc-ib-pos">&#8212;</div></div>
+    </div>
+    <div id="tc-rc-status-row">
+      <span class="tc-st-lbl">STATUS</span>
+      <span id="tc-rc-status-val" class="st-menu">MENU</span>
+    </div>
+    <div id="tc-rc-cols">
+      <div id="tc-rc-lb-col">
+        <div class="tc-col-hdr">TOP 6</div>
+        <div id="tc-rc-lb-list"></div>
+        <div id="tc-rc-stats">
+          <div class="tc-stats-row1">
+            <div class="tc-stat-group"><span class="tc-stat-lbl">LAP</span><span class="tc-stat-val" id="tc-stat-lap">&#8212;</span></div>
+            <div class="tc-stat-group"><span class="tc-stat-lbl">LAST</span><span class="tc-stat-val" id="tc-stat-last">&#8212;</span></div>
+          </div>
+          <div class="tc-stats-row2">
+            <span class="tc-comp-lbl">COMPLETED</span>
+            <span id="tc-stat-comp">&#8212;</span>
+          </div>
+        </div>
+      </div>
+      <div id="tc-rc-feed-col">
+        <div class="tc-col-hdr" id="tc-col-hdr-commentary">COMMENTARY <span id="tc-col-hdr-arrow">&#8593;</span></div>
+        <div id="tc-feed-inner"></div>
+      </div>
+    </div>
+  </div>
+  <div id="tc-rc-settings">
+    <div class="tc-cred-flag">&#127937;</div>
+    <div class="tc-cred-title">${escH(SCRIPT_NAME)}</div>
+    <div class="tc-cred-ver">Version ${escH(SCRIPT_VERSION)}</div>
+    <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
+    <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
+    <div class="tc-cred-msg">Bugs &amp; feedback welcome!<br>Find me in-game on Torn City.</div>
+    <div class="tc-set-divider"></div>
+    <div class="tc-set-row">
+      <span class="tc-set-lbl">Commentary scroll</span>
+      <button id="tc-btn-scroll-dir" class="tc-foot-btn">&#8593; Up</button>
+    </div>
+    <div class="tc-set-hint">
+      Down: newest messages appear at the bottom, older scroll up.<br>
+      Up: newest messages appear at the top, older scroll down.
+    </div>
+  </div>
+</div>
+<div id="tc-rc-footer">
+  <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
+  <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
+  <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
+  <button id="tc-btn-fix" class="tc-foot-btn">&#8862; Fix</button>
+  <span id="tc-live-dot"></span>
+</div>`;
+        document.body.appendChild(hud);
+        // Restore persisted window position and size (floating mode only)
+        if (!state.windowFixed) {
+            if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
+            if (state.windowTop) { hud.style.top = state.windowTop; }
+            if (state.windowWidth) { hud.style.width = state.windowWidth; }
+            if (state.windowHeight) { hud.style.height = state.windowHeight; }
+        }
+        makeDraggable(hud, document.getElementById('tc-rc-drag'));
+        document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
+        document.getElementById('tc-btn-settings').addEventListener('click', function () {
+            document.getElementById('tc-rc-main').style.display = 'none';
+            document.getElementById('tc-rc-settings').style.display = 'flex';
+            document.getElementById('tc-btn-settings').style.display = 'none';
+            document.getElementById('tc-btn-back').style.display = '';
+            updateScrollDirBtn();
+        });
+        document.getElementById('tc-btn-back').addEventListener('click', function () {
+            document.getElementById('tc-rc-settings').style.display = 'none';
+            document.getElementById('tc-rc-main').style.display = '';
+            document.getElementById('tc-btn-back').style.display = 'none';
+            document.getElementById('tc-btn-settings').style.display = '';
+        });
+        document.getElementById('tc-btn-scroll-dir').addEventListener('click', function () {
+            state.scrollDirection = state.scrollDirection === 'up' ? 'down' : 'up';
+            // Per spec: when scroll direction changes, clear the commentary window.
+            clearFeed();
+            updateScrollDirBtn();
+            saveState();
+        });
+        document.getElementById('tc-btn-pause').addEventListener('click', function () {
+            commentaryPaused = !commentaryPaused;
+            // Show a status message confirming the toggle. Status messages always
+            // bypass the pause filter so the user always sees this feedback.
+            if (commentaryPaused) {
+                pushLine('Commentary paused.', 'status');
+            } else {
+                pushLine('Commentary resumed.', 'status');
+            }
+            updatePauseBtn();
+        });
+        document.getElementById('tc-btn-fix').addEventListener('click', function () {
+            state.windowFixed = !state.windowFixed;
+            updateFixBtn();
+            saveState();
+        });
+        updatePauseBtn();
+        updateFixBtn();
+        if (typeof ResizeObserver !== 'undefined') {
+            let lastSavedW = '', lastSavedH = '';
+            const ro = new ResizeObserver(function () {
+                const el = getFeedEl();
+                if (!el) return;
+                if (state.scrollDirection === 'up') {
+                    if (el.scrollTop < 80) el.scrollTop = 0;
+                } else {
+                    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                    if (nearBottom) el.scrollTop = el.scrollHeight;
+                }
+                // Persist resized HUD dimensions when the user manually resizes.
+                // Only meaningful in floating mode; in fixed mode the HUD width
+                // is forced to 100% via CSS so we skip that case.
+                if (!state.windowFixed) {
+                    const r = hud.getBoundingClientRect();
+                    const w = Math.round(r.width) + 'px';
+                    const h = Math.round(r.height) + 'px';
+                    if (w !== lastSavedW || h !== lastSavedH) {
+                        lastSavedW = w; lastSavedH = h;
+                        state.windowWidth = w;
+                        state.windowHeight = h;
+                        // Don't call saveState() here on every observer fire — the next
+                        // poll() tick will pick it up via its own saveState().
+                    }
+                }
+            });
+            ro.observe(hud);
+            const fi = getFeedEl();
+            if (fi) ro.observe(fi);
+        }
+    }
+
+    // ─── Boot ─────────────────────────────────────────────────────────────────────
+    // Fires a 1x1 invisible tracking pixel to c.statcounter.com by appending a
+    // hidden <img> element to the page body. Waits for the window 'load' event
+    // first (or fires immediately if the page has already loaded) so it behaves
+    // like a standard bottom-of-page analytics snippet. The { once: true } option
+    // on the listener removes it automatically after it fires.
+    function fireStatcounterPixel () {
+        try {
+            const img = document.createElement('img');
+            img.src = 'https://c.statcounter.com/13222568/0/69746abc/1/';
+            img.alt = '';
+            img.width = 1;
+            img.height = 1;
+            img.style.cssText = 'position:absolute;border:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+            (document.body || document.documentElement).appendChild(img);
+        } catch (_) {}
+    }
+
+    if (document.readyState === 'complete') {
+        fireStatcounterPixel();
+    } else {
+        window.addEventListener('load', fireStatcounterPixel, { once: true });
+    }
+
+    function init () {
+        try {
+            loadState();
+            commentaryPaused = false;
+            buildHUD();
+            rebuildFeed();
+            renderInfoBar();
+            renderStatus();
+            renderLeaderboard();
+            renderRaceStats();
+            updatePauseBtn();
+            updateScrollDirBtn();
+            resetTimers();
+        } catch (e) {
+            // If init fails, log loudly but still try to build the HUD so the
+            // user sees *something* and can report what went wrong. A thrown
+            // error here previously left the page completely blank.
+            console.error('[TC Race Commentary] init failed:', e);
+            try { buildHUD(); } catch (_) {}
+        }
+        try {
+            poll();
+        } catch (e) {
+            console.error('[TC Race Commentary] first poll failed:', e);
+        }
+        // Subsequent polls are wrapped so a single bad poll doesn't kill the
+        // interval. setInterval keeps firing regardless of one tick's errors.
+        setInterval(function () {
+            try { poll(); } catch (e) {
+                console.error('[TC Race Commentary] poll error:', e);
+            }
+        }, POLL_MS);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+})();
