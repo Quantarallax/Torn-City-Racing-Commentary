@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.57.0
+// @version      2.58.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.57.0';
+    const SCRIPT_VERSION = '2.58.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v66';
+    const STORAGE_KEY = 'tc_racecomm_v67';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -93,7 +93,8 @@
 
     const S = {
         MENU: 'MENU', COUNTDOWN: 'COUNTDOWN', PRE_LAUNCH: 'PRE_LAUNCH',
-        WAITING: 'WAITING', RACING: 'RACING', ENDED: 'ENDED', CRASHED: 'CRASHED',
+        WAITING: 'WAITING', RACING: 'RACING', RACE_REPLAY: 'RACE_REPLAY',
+        ENDED: 'ENDED', CRASHED: 'CRASHED',
         UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
         NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED',
@@ -109,6 +110,14 @@
         'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED',
         'TORN_DOWN', 'IN_GARAGE', 'STATISTICS', 'ENLISTED'
     ];
+
+    // RACE_REPLAY behaves identically to RACING for commentary, position
+    // tracking, ambient timing, halfway message, etc. Only the display label
+    // differs. This helper centralises the "is the race actively running?"
+    // check so the two statuses stay in sync.
+    function isRacingLike (st) {
+        return st === S.RACING || st === S.RACE_REPLAY;
+    }
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
     const LINES = {
@@ -417,7 +426,7 @@
             currentStatus = state.status;
             clearedForStatus = state.status;
             // Flag refresh during RACING so we show a summary instead of join messages
-            if (state.status === S.RACING) restoredIntoRacing = true;
+            if (isRacingLike(state.status)) restoredIntoRacing = true;
         } catch (_) {}
     }
 
@@ -704,7 +713,7 @@
     // atmospheric colour commentary and set the pace. Returns true if the
     // non-ambient message should be shown, false to suppress it.
     function bigRaceShouldShow () {
-        if (state.status !== S.RACING) return true;
+        if (!isRacingLike(state.status)) return true;
         if ((state.racerCount || 0) <= BIG_RACE_THRESHOLD) return true;
         nonAmbientRaceCounter++;
         return (nonAmbientRaceCounter % BIG_RACE_SHOW_EVERY) === 1;
@@ -747,7 +756,7 @@
             }
         }
 
-        if (st === S.RACING) {
+        if (isRacingLike(st)) {
             if (now >= tAmbient) {
                 pushLine(fill(pickLine(LINES.RACING.ambient, 'ambient')), 'ambient');
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
@@ -879,7 +888,7 @@
     function detectOtherCrashes () {
         // Run during active RACING OR during the post-refresh restore bounce
         // where the detected status may briefly flicker before settling.
-        if (state.status !== S.RACING && !restoredIntoRacing) return;
+        if (!isRacingLike(state.status) && !restoredIntoRacing) return;
 
         // Collect candidate crash markers via several selector strategies,
         // covering Torn's possible class variations (plain "status crash",
@@ -962,7 +971,7 @@
     }
 
     // ─── Status transition ────────────────────────────────────────────────────────
-    const CLEAR_ON_ENTRY = [S.COUNTDOWN, S.PRE_LAUNCH, S.RACING];
+    const CLEAR_ON_ENTRY = [S.COUNTDOWN, S.PRE_LAUNCH, S.RACING, S.RACE_REPLAY];
 
     function onStatusChange (oldSt, newSt) {
         resetTimers();
@@ -1058,6 +1067,13 @@
                 const tn = state.track !== '—' ? state.track : 'this circuit';
                 pushLine("It's a green light — we are go on " + tn + "!", 'status', ICON.flag);
             }
+        }
+        if (newSt === S.RACE_REPLAY && oldSt !== S.RACE_REPLAY) {
+            // Replays are treated like RACING for commentary, but with a
+            // dedicated entry line so the user knows what they're watching.
+            clearFeed();
+            const tn = state.track !== '—' ? state.track : 'this circuit';
+            pushLine('Replay rolling — race action on ' + tn + '!', 'status', ICON.flag);
         }
         if (newSt === S.CRASHED) fireCrashSequence();
         if (newSt === S.MENU && oldSt !== S.MENU) {
@@ -1569,6 +1585,16 @@
         if (/this\s+page\s+is\s+unavailable\s+while\s+you'?re\s+travel(l)?ing/i.test(text)) {
             return S.UNAVAILABLE;
         }
+        // CRASHED detection (player) — text-based fallback. Per spec, look for
+        // the literal "You Crashed!" announcement on the page. This catches
+        // the player's own crash even when the DOM markers haven't propagated
+        // (or use a class scheme we don't recognise). The page text from
+        // getPageText() already has Events-feed pollution scrubbed (via
+        // EVENTS_TEXT_PATTERN), so this match is from the live racing UI.
+        if (/you\s+crashed\s*!/i.test(text)) {
+            return S.CRASHED;
+        }
+
         // CRASHED detection (player): per spec, walk the precise DOM hierarchy.
         // Each racer row is an <li class="lbr-{id}"> containing an
         // <li class="status-wrap"> with a <div class="status crash"> when that
@@ -1615,6 +1641,13 @@
             }
         }
         if (/race\s+finished/i.test(text) || /you\s+finished\s+in\s+\d/i.test(text) || document.querySelector('[class*="raceEnd"], [class*="raceFinished"]')) return S.ENDED;
+        // RACE REPLAY: a recorded replay of an earlier race. Behaves like RACING
+        // but gets a distinct status label. Detected by the "Race Replay" page
+        // marker. Checked BEFORE the live-race detection so a replay isn't
+        // mistaken for an in-progress race.
+        if (/race\s+replay/i.test(text) || document.querySelector('[class*="raceReplay"], [class*="race-replay"]')) {
+            return S.RACE_REPLAY;
+        }
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
         if (/not\s+enough\s+drivers/i.test(text)) {
             waitingSeenCount++;
@@ -1658,7 +1691,7 @@
         // statistics, or enlisted-cars pages, the scraper can pick up unrelated
         // car-list entries and show them incorrectly in the display. Freeze the
         // CAR display on those pages — keep whatever was last shown.
-        const carFrozenStatuses = [S.MENU, S.IN_GARAGE, S.STATISTICS, S.ENLISTED];
+        const carFrozenStatuses = [S.MENU, S.IN_GARAGE, S.STATISTICS, S.ENLISTED, S.RACE_REPLAY];
         if (newCar && carFrozenStatuses.indexOf(newStatus) === -1) state.car = newCar;
 
         if (posData) {
@@ -1693,7 +1726,7 @@
                 // Refreshed during a race — add all current racers to known set silently
                 // then show a summary message once
                 newRacers.forEach(function (r) { knownRacerNames.add(r.name); });
-                if (newStatus === S.RACING) {
+                if (isRacingLike(newStatus)) {
                     const n = newRacers.length || state.racerCount || '?';
                     pushLine(
                         n + ' racer' + (n === 1 ? '' : 's') + ' currently competing. Resuming commentary\u2026',
@@ -1747,7 +1780,7 @@
         // Scrape Torn's .status.crash DOM markers unconditionally each poll —
         // catches crashes even if newRacers was briefly empty this tick,
         // and catches any crash already in the DOM after a page refresh.
-        if (state.status === S.RACING || restoredIntoRacing) {
+        if (isRacingLike(state.status) || restoredIntoRacing) {
             detectOtherCrashes();
             if (otherCrashedNames.size) {
                 state.racers = excludeCrashed(state.racers);
@@ -1794,6 +1827,7 @@
             [S.PRE_LAUNCH]: { label: 'PRE-LAUNCH', cls: 'st-prelaunch' },
             [S.WAITING]: { label: 'WAITING', cls: 'st-waiting' },
             [S.RACING]: { label: 'RACING', cls: 'st-racing' },
+            [S.RACE_REPLAY]: { label: 'RACE REPLAY', cls: 'st-replay' },
             [S.ENDED]: { label: 'ENDED', cls: 'st-ended' },
             [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
             [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' },
@@ -1966,7 +2000,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-replay{color:var(--c-purple);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
