@@ -1,4 +1,4 @@
-# Torn-City-Racing-Commentary
+# Torn City Racing Commentary
 Add realtime commentary on your races in Torn City.
 
 Install into TamperMonkey https://www.tampermonkey.net/
