@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.58.0
+// @version      2.59.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.58.0';
+    const SCRIPT_VERSION = '2.59.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v67';
+    const STORAGE_KEY = 'tc_racecomm_v68';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -137,7 +137,9 @@
                 'One of the cars bursts into flames. And is quickly put out.',
                 'Oh, this will be interesting, I\'m sure.',
                 'Records on {track} are nigh on impossible to beat nowadays.',
+                "It's a beautiful day for a race.",
                 'We suspect the no weapons rule will not be followed.',
+                '{track} has not had a record broken in years.',
                 'Tick tick tick, *boom* Hopefully.',
                 'Excitement rings through the crowd.',
                 'Crowds are now gathering at all the best vantage points.',
@@ -164,6 +166,7 @@
                 'All systems ready. The crowd has gone eerily quiet.',
                 'The lights are about to come on. This is the moment.',
                 'Pre-launch can be the worst part of the race.',
+                '{player} is shaking behind the wheel.',
                 'Faction members hold banners up, their message clear.'
             ],
             player: [
@@ -192,6 +195,7 @@
                 'Carnage here, carnage there, carnage EVERYWHERE.',
                 'Someone carelessly walks into the path of traffic! Oh dear.',
                 'The crowd screams in appreciation.',
+                'Coffee time. And a Xanax.',
                 'Someone released a spike-strip onto the track.',
                 "There's a massive oil spillage and debris at the first turn.",
                 'Explosions can be heard across the track area.',
@@ -300,6 +304,13 @@
         // selectors that can match extra elements and overcount.
         // Value of 0 = unknown (treat as 2-racer-safe until confirmed otherwise).
         racerCount: 0,
+        // Snapshot of the largest racer field seen during the active race.
+        // Used by the outro logic to require ALL racers have crossed the line
+        // before "Brought to you by..." fires. racerCount itself can shrink as
+        // Torn collapses the leaderboard, or change when the user clicks on
+        // another racer in Torn's list. This snapshot only grows during a race
+        // and is reset on new race entry.
+        raceFieldSize: 0,
         racers: [],
         prevRacers: [],
         finishers: [],
@@ -382,6 +393,7 @@
             state.focusedCar = p.focusedCar || '';
             state.focusedPosition = p.focusedPosition || '';
             state.racerCount = p.racerCount || 0;
+            state.raceFieldSize = p.raceFieldSize || 0;
             state.racers = p.racers || [];
             state.prevRacers = p.racers || [];
             state.finishers = p.finishers || [];
@@ -442,6 +454,7 @@
                 focusedCar: state.focusedCar,
                 focusedPosition: state.focusedPosition,
                 racerCount: state.racerCount,
+                raceFieldSize: state.raceFieldSize,
                 racers: state.racers,
                 finishers: state.finishers,
                 outroShown: state.outroShown,
@@ -668,24 +681,21 @@
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
                     } else if (currentStatus === S.PRE_LAUNCH) {
-                        // Per spec: each new arrival in PRE_LAUNCH gets the full
-                        // 3-line sequence with 1-second pauses between lines.
+                        // Per spec: each new arrival in PRE_LAUNCH gets ONE of
+                        // three messages, chosen randomly, after a 1-second pause.
                         const arrivalName = r.name;
-                        try {
-                            pushLine(arrivalName + ' just joined in position ' + posStr + '.', 'status', ICON.join);
-                        } catch (e) { console.error('[TC RC] pre-launch line 1:', e); }
+                        const preLaunchLines = [
+                            arrivalName + ' just joined in position ' + posStr + '.',
+                            arrivalName + ' does a last minute check.',
+                            arrivalName + ' looks fidgety behind the wheel.'
+                        ];
+                        const choice = preLaunchLines[Math.floor(Math.random() * preLaunchLines.length)];
                         setTimeout(function () {
                             try {
                                 if (currentStatus !== S.PRE_LAUNCH) return;
-                                pushLine(arrivalName + ' does a last minute check.', 'status', ICON.join);
-                            } catch (e) { console.error('[TC RC] pre-launch line 2:', e); }
+                                pushLine(choice, 'status', ICON.join);
+                            } catch (e) { console.error('[TC RC] pre-launch line:', e); }
                         }, 1000);
-                        setTimeout(function () {
-                            try {
-                                if (currentStatus !== S.PRE_LAUNCH) return;
-                                pushLine(arrivalName + ' looks fidgety behind the wheel.', 'status', ICON.join);
-                            } catch (e) { console.error('[TC RC] pre-launch line 3:', e); }
-                        }, 2000);
                     }
                 }
             }
@@ -897,7 +907,17 @@
             '.status.crash',
             '[class*="status"][class*="crash"]',
             '[class*="statusCrash"]',
-            '[class*="crashed"]'
+            '[class*="crashed"]',
+            // Lone .crash element inside an lbr- racer row — catches Torn's
+            // structure where the crash indicator is just <div class="crash">
+            // without "status" being a sibling class on the same element
+            'li[class*="lbr-"] .crash',
+            'li[class*="lbr_"] .crash',
+            // Some module-CSS schemes hash class names like _crash_xyz123
+            'li[class*="lbr-"] [class^="crash"]',
+            'li[class*="lbr-"] [class*=" crash"]',
+            // Status-wrap with crash child — the spec's exact path
+            'li[class*="status-wrap"] [class*="crash"]'
         ];
         const candidates = new Set();
         selectors.forEach(function (sel) {
@@ -1006,6 +1026,7 @@
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
+                state.raceFieldSize = 0;
 
                 // Repopulate knownRacerNames with the racers that were already on the
                 // track when the player joined. This means only genuinely NEW arrivals
@@ -1177,8 +1198,13 @@
             }
         });
         if (!state.outroShown && state.finishers.length > 0) {
-            const total = state.racerCount || state.racers.length || state.finishers.length;
-            if (state.finishers.length >= total) {
+            // Use the snapshotted field size from when the race was running,
+            // not state.racerCount (which can shrink as Torn collapses the
+            // leaderboard) or state.finishers.length (which would always be
+            // satisfied trivially). Require we know the field size AND that
+            // every racer in the field has finished.
+            const total = state.raceFieldSize || state.racerCount;
+            if (total > 0 && state.finishers.length >= total) {
                 state.outroShown = true;
                 setTimeout(function () {
                     pushLine('That was a fantastic race! Thank you for tuning in. Brought to you by Sanxion [2987640].', 'outro');
@@ -1604,7 +1630,10 @@
         // the enclosing lbr- row, then check the .name span matches the player.
         const crashMarkers = document.querySelectorAll(
             'div.status.crash, div[class*="status"][class*="crash"], ' +
-            '[class*="statusCrash"], [class*="crashed"], [class*="wrecked"]'
+            '[class*="statusCrash"], [class*="crashed"], [class*="wrecked"], ' +
+            'li[class*="lbr-"] .crash, li[class*="lbr_"] .crash, ' +
+            'li[class*="lbr-"] [class^="crash"], li[class*="lbr-"] [class*=" crash"], ' +
+            'li[class*="status-wrap"] [class*="crash"]'
         );
         for (let i = 0; i < crashMarkers.length; i++) {
             const m = crashMarkers[i];
@@ -1698,7 +1727,14 @@
             state.position = posData.pos;
             // *** ONLY source of racerCount — Position: X/Y from the page ***
             // Always trust this value; it's the authoritative Torn count.
-            if (posData.total > 0) state.racerCount = posData.total;
+            if (posData.total > 0) {
+                state.racerCount = posData.total;
+                // Latch the maximum field size seen during the race — used for
+                // the outro threshold so we wait for ALL racers to cross the line.
+                if (posData.total > state.raceFieldSize) {
+                    state.raceFieldSize = posData.total;
+                }
+            }
         }
         // *** DO NOT update racerCount from newRacers.length ***
         // scrapeRacers() uses broad DOM selectors and can overcount.
