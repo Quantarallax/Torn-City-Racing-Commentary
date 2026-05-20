@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.59.0
+// @version      2.60.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -19,7 +19,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.59.0';
+    const SCRIPT_VERSION = '2.60.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +35,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v68';
+    const STORAGE_KEY = 'tc_racecomm_v69';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -1182,36 +1182,115 @@
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
+    // Template pool for the AI-style race summary — second of the four outro
+    // lines. A Tampermonkey userscript cannot embed an Anthropic API key in
+    // public source (anyone could read and abuse it), so genuine LLM-generated
+    // summaries are not feasible here. Instead these templates are written in
+    // commentator voice and filled with race-specific data (player, track,
+    // position, field size, top finishers). The pool is large enough that
+    // repeats are uncommon, and the dedupe machinery in pickLine respects
+    // recentByType so consecutive races don't get identical summaries.
+    const OUTRO_SUMMARIES = [
+        // 3-sentence templates. Each sentence-end is a real full stop so the
+        // line reads naturally even when tokens fail to resolve.
+        "What a contest we have witnessed today on {track}. {player} battled through a field of {total} and came home in {pos}. The crowd will remember this one for some time.",
+        "{track} put on a show, ladies and gentlemen. {player} fought hard and finished {pos} out of {total}. Performances like that are what bring the punters back race after race.",
+        "An absolute belter of a race on {track}. {player} crossed the line in {pos} after a frantic battle. The standard of driving today was truly something to behold.",
+        "Drama, speed, and a touch of madness — that was the story on {track} today. {player} took {pos} from a field of {total}. We have seen some racing here, my goodness.",
+        "From flag to flag, {track} delivered everything we hoped for. {player} secured {pos} in a {total}-driver scrap. A worthy result on a tough circuit.",
+        "If you missed this one on {track}, you missed something special. {player} brought it home in {pos} amidst a frantic field of {total}. Pure racing entertainment from start to finish.",
+        "The chequered flag has fallen on {track}, and what a race it was. {player} fought tooth and nail to claim {pos}. Every position out there was earned, not given.",
+        "Today's race on {track} had everything we love about this sport. {player} finishes in {pos} of {total} after a relentless battle. Tip of the cap to every driver who lined up today.",
+        "Sometimes a race rewrites the form book — this was one of those days at {track}. {player} took {pos} from a {total}-strong field. Memorable scenes from start to finish.",
+        "Hold onto your hats — {track} just served up a thriller. {player} settled into {pos}, fighting every inch of the way. That, my friends, is why we tune in week after week."
+    ];
+
+    // pickSummary selects a templated outro summary that hasn't been used
+    // recently, fills in the race-specific tokens, and returns the result.
+    function pickSummary () {
+        try {
+            const template = pickLine(OUTRO_SUMMARIES, 'outro');
+            // Fill tokens manually here so we control which fields are available
+            const total = state.raceFieldSize || state.racerCount || state.finishers.length || '?';
+            const playerFinish = state.finishers.find(function (f) { return f.name === state.playerName; });
+            const posNum = playerFinish ? playerFinish.pos : (parseInt(state.position, 10) || 0);
+            const safePlayer = (state.playerName && state.playerName !== '—' && !NAME_BLACKLIST.test(state.playerName))
+                ? state.playerName : 'The driver';
+            const safeTrack = (state.track && state.track !== '—') ? state.track : 'this circuit';
+            return template
+                .replace(/\{player\}/g, safePlayer)
+                .replace(/\{track\}/g, safeTrack)
+                .replace(/\{pos\}/g, posNum > 0 ? ordinal(posNum) : 'a strong position')
+                .replace(/\{total\}/g, total);
+        } catch (e) {
+            console.error('[TC Race Commentary] pickSummary:', e);
+            // Conservative fallback if anything throws — keeps the outro flowing.
+            return 'A truly memorable contest from start to finish. Hard racing throughout, and every driver gave their all. We will not forget this one in a hurry.';
+        }
+    }
+
     function processFinishers (scraped) {
-        let list = scraped;
-        if (!list.length && state.status === S.ENDED && state.playerName !== '—') {
-            list = [{ name: state.playerName, pos: parseInt(state.position, 10) || 1 }];
-        }
-        list.forEach(function (f) {
-            if (!knownFinishers.has(f.name)) {
-                knownFinishers.add(f.name);
-                state.finishers.push(f);
-                pushLine(
-                    f.name + ' crosses the finish line in ' + ordinal(f.pos || state.finishers.length) + '!',
-                    'finish', ICON.flag
-                );
-            }
-        });
-        if (!state.outroShown && state.finishers.length > 0) {
-            // Use the snapshotted field size from when the race was running,
-            // not state.racerCount (which can shrink as Torn collapses the
-            // leaderboard) or state.finishers.length (which would always be
-            // satisfied trivially). Require we know the field size AND that
-            // every racer in the field has finished.
-            const total = state.raceFieldSize || state.racerCount;
-            if (total > 0 && state.finishers.length >= total) {
-                state.outroShown = true;
-                setTimeout(function () {
-                    pushLine('That was a fantastic race! Thank you for tuning in. Brought to you by Sanxion [2987640].', 'outro');
-                    saveState();
-                }, 3500);
+        // Per spec rewrite: this function is now PLAYER-ONLY. We do NOT print
+        // finish-line lines for other racers. We watch only for the player's
+        // own crossing, fire one line for them, then trigger the 4-line outro
+        // sequence (1s pauses between, all in white text). This change makes
+        // the outro deterministic: it always fires after the player crosses,
+        // regardless of which other racers Torn is currently displaying.
+        if (state.outroShown) return;
+        const pname = state.playerName;
+        if (!pname || pname === '—' || NAME_BLACKLIST.test(pname)) return;
+
+        // Check if the player is in the scraped finisher list. If yes, capture
+        // their position. If no, fall back to using state.position when ENDED.
+        let playerFinish = null;
+        for (let i = 0; i < scraped.length; i++) {
+            if (scraped[i].name === pname) {
+                playerFinish = scraped[i];
+                break;
             }
         }
+        if (!playerFinish && state.status === S.ENDED) {
+            const fromPos = parseInt(state.position, 10);
+            if (fromPos > 0) playerFinish = { name: pname, pos: fromPos };
+        }
+        if (!playerFinish) return;
+
+        // Only fire the player-cross line once.
+        if (!knownFinishers.has(pname)) {
+            knownFinishers.add(pname);
+            state.finishers.push(playerFinish);
+            pushLine(
+                pname + ' crosses the finish line in ' + ordinal(playerFinish.pos) + '!',
+                'finish', ICON.flag
+            );
+        }
+
+        // Fire the 4-line outro sequence with 1-second pauses between lines.
+        // All four lines render in white via the 'outro' type (see CSS).
+        state.outroShown = true;
+        saveState();
+        // Stagger: line1 immediate (after the cross line just pushed), line2 +1s,
+        // line3 +2s, line4 +3s. We use 1000/2000/3000/4000ms offsets from the
+        // start so that the cross-line has visible breathing room before line1.
+        const summary = pickSummary();
+        setTimeout(function () {
+            try { pushLine('That was a fantastic race, ladies and gentlemen!', 'outro'); }
+            catch (e) { console.error('[TC RC] outro 1:', e); }
+        }, 1000);
+        setTimeout(function () {
+            try { pushLine(summary, 'outro'); }
+            catch (e) { console.error('[TC RC] outro 2:', e); }
+        }, 2000);
+        setTimeout(function () {
+            try { pushLine('Thank you for tuning in.', 'outro'); }
+            catch (e) { console.error('[TC RC] outro 3:', e); }
+        }, 3000);
+        setTimeout(function () {
+            try {
+                pushLine('Brought to you by Sanxion [2987640].', 'outro');
+                saveState();
+            } catch (e) { console.error('[TC RC] outro 4:', e); }
+        }, 4000);
     }
 
     // ─── Scrapers ─────────────────────────────────────────────────────────────────
@@ -2079,7 +2158,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 .fl-player{color:#ffe060;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);}
 .fl-position{color:var(--c-blue);border-left-color:#2870cc;background:rgba(110,196,255,.07);}
 .fl-finish{color:var(--c-purple);font-weight:700;font-size:13.5px;border-left-color:#a855f7;background:rgba(208,144,255,.07);margin:1px 0;}
-.fl-outro{color:var(--c-gold);font-weight:600;border-left-color:var(--c-gold);background:rgba(245,192,48,.08);padding-top:5px;padding-bottom:5px;}
+.fl-outro{color:#fff;font-weight:600;border-left-color:#fff;background:rgba(255,255,255,.06);padding-top:5px;padding-bottom:5px;}
 .fl-crash{color:var(--c-red);font-weight:700;border-left-color:var(--c-red);background:rgba(255,102,102,.08);}
 .fl-waiting{color:var(--c-orange);font-style:italic;border-left-color:var(--c-orange);background:rgba(255,170,80,.07);}
 #tc-rc-footer{display:flex;align-items:center;gap:5px;padding:4px 10px;background:var(--c-bg2);border-top:1px solid var(--c-border2);flex-shrink:0;flex-wrap:wrap;}
