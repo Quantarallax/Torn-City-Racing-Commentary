@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.62.0
+// @version      2.63.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.62.0';
+    const SCRIPT_VERSION = '2.63.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v71';
+    const STORAGE_KEY = 'tc_racecomm_v72';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -434,11 +434,20 @@
     let tWaiting = 0;
     let tPosCooldown = 0;
 
-    // For large-grid throttling: counts non-ambient racing messages so we can
-    // show only every 10th when there are more than 20 drivers. Session-only.
+    // Big-race throttle (per spec v2.63): when racerCount > BIG_RACE_THRESHOLD,
+    // non-ambient commentary messages are throttled to at most one every 3-5
+    // seconds (jittered randomly within that window) so the feed doesn't
+    // flood. AMBIENT messages always pass through this gate — they have their
+    // own pacing via tAmbient. Session-only; nothing persisted.
     const BIG_RACE_THRESHOLD = 20;
-    const BIG_RACE_SHOW_EVERY = 20;
-    let nonAmbientRaceCounter = 0;
+    // Minimum/maximum gap between non-ambient lines in a big race. Each time
+    // a line passes the gate, the next gap is rolled randomly in [MIN, MAX].
+    const BIG_RACE_MIN_GAP_MS = 3000;
+    const BIG_RACE_MAX_GAP_MS = 5000;
+    // Timestamp of the last non-ambient line shown under the throttle. The
+    // next line is admitted only after the rolled gap has elapsed.
+    let bigRaceLastShownAt = 0;
+    let bigRaceNextAllowedAt = 0;
 
     let recentByType = {
         ambient: [], player: [], position: [],
@@ -1159,16 +1168,21 @@
     }
 
     // ─── Commentary ───────────────────────────────────────────────────────────────
-    // Big-grid throttling: in RACING with more than 20 drivers, only show every
-    // 10th non-ambient message (position calls, player-specific, proximity,
-    // movement calls). Ambient lines and funny lines always show — they're the
-    // atmospheric colour commentary and set the pace. Returns true if the
-    // non-ambient message should be shown, false to suppress it.
+    // Big-grid throttling (per spec v2.63): in RACING with more than 20 drivers,
+    // non-ambient messages (position calls, player-specific, proximity,
+    // movement) are admitted at most once every 3-5 seconds (random jitter).
+    // Ambient and funny lines bypass this — they're the atmospheric colour
+    // and set the pace. Returns true if the line should be shown.
     function bigRaceShouldShow () {
         if (!isRacingLike(state.status)) return true;
         if ((state.racerCount || 0) <= BIG_RACE_THRESHOLD) return true;
-        nonAmbientRaceCounter++;
-        return (nonAmbientRaceCounter % BIG_RACE_SHOW_EVERY) === 1;
+        const now = Date.now();
+        if (now < bigRaceNextAllowedAt) return false;
+        // Admit this one — roll the next gap in [3s, 5s].
+        bigRaceLastShownAt = now;
+        const jitter = BIG_RACE_MIN_GAP_MS + Math.random() * (BIG_RACE_MAX_GAP_MS - BIG_RACE_MIN_GAP_MS);
+        bigRaceNextAllowedAt = now + jitter;
+        return true;
     }
 
     function fireCommentary (st) {
@@ -1470,7 +1484,9 @@
                 knownFinishers.clear();
                 knownRacerNames.clear();
                 otherCrashedNames.clear();
-                nonAmbientRaceCounter = 0;
+                // Reset big-race throttle state for the new race.
+                bigRaceLastShownAt = 0;
+                bigRaceNextAllowedAt = 0;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
