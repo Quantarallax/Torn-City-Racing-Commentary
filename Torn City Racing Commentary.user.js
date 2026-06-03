@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.61.0
+// @version      2.62.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.61.0';
+    const SCRIPT_VERSION = '2.62.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v70';
+    const STORAGE_KEY = 'tc_racecomm_v71';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -244,6 +244,58 @@
                 'Worth bearing in mind on {track} — {trackDesc}',
                 'Every driver here knows what {track} can do — {trackDesc}'
             ],
+            // Tier-specific ambient pools, gated by state.racerCount. The tier
+            // boundaries (2-6, 7-15, 16-50, 51-75, 76-100) come from the spec
+            // section "NUMBER OF RACERS AFFECTS TYPE OF MESSAGES SHOWN". Each
+            // tier captures the FEEL of a race of that size — space, noise,
+            // grit, visibility — and mixes those flavour notes into commentary.
+            tierTiny: [
+                // 2-6: quiet, plenty of space
+                'Plenty of room out there — almost a private session.',
+                'A quiet field today. Each driver has space to breathe.',
+                'Just a handful of cars, and you can hear every engine note.',
+                'No traffic to fight — pure driving on display.',
+                'With so few entries, every overtake matters double.',
+                'A sparse grid means clean lines and clear sightlines.'
+            ],
+            tierSmall: [
+                // 7-15: filling up, less space
+                'Field starting to fill up. Less space, more drama.',
+                'The pack tightens — overtaking gets trickier from here.',
+                'Mid-sized field, and you can feel the pressure building.',
+                'Enough cars now that every corner has a queue.',
+                'Drivers having to pick their gaps carefully.',
+                'The track no longer feels like the driver\'s own.'
+            ],
+            tierMedium: [
+                // 16-50: lots of cars, noisier, smellier
+                'A busy track today — the noise is something to hear.',
+                'Lots of metal out there. The smell of fuel and rubber is heavy.',
+                'Plenty of cars in the mix — space at a premium.',
+                'The growl of all those engines together is a special sound.',
+                'A proper field — and a proper racket from the grandstands.',
+                'Fuel fumes hang thick over the track. This is racing.'
+            ],
+            tierLarge: [
+                // 51-75: lots of cars, mud/grit flying, hard to see
+                'Mud and grit flying up — visibility is becoming a real problem.',
+                'A huge field — and you can barely see through the windscreen.',
+                'Cars stacked up everywhere. Mud spraying from every wheel.',
+                'Drivers will be wiping grit from their visors at every straight.',
+                'Wall-to-wall cars and a windscreen full of debris.',
+                'Vying for space at every turn — and a face full of muck.'
+            ],
+            tierMassive: [
+                // 76-100: total carnage
+                'Absolute carnage out there! Cars everywhere!',
+                'The whole grid is one big rolling traffic jam.',
+                'Slowing down, speeding up, slowing down again — chaos.',
+                'Smelly, noisy, and frankly exciting. This is what racing is.',
+                'Mud and grit flying like confetti at a wedding.',
+                'Can the drivers even see? Visibility is non-existent.',
+                'A swarm of cars. Survival as much as speed.',
+                'Total mayhem. Every gap closes the moment it opens.'
+            ],
             player: [
                 '{player} sits in {pos}, keeping it clean and consistent.',
                 '{player} threads every corner in the {car}. A measured drive.',
@@ -353,6 +405,9 @@
         lastLap: '—',
         currentLap: '—',
         completion: '—',
+        // Fix Button removed in v2.62 — windowFixed is no longer used but
+        // remains as a placeholder to keep persisted-state compatibility with
+        // older versions. Always false, never read by behaviour code.
         windowFixed: false,
         // Persisted window placement: position and resized dimensions (floating mode only).
         windowLeft: '',
@@ -405,6 +460,21 @@
     // Consecutive polls that have seen "not enough drivers" — requires 2 to confirm WAITING.
     // Resets to 0 the moment any other status is detected, preventing stuck WAITING.
     let waitingSeenCount = 0;
+
+    // ─── Per-poll page-text cache ─────────────────────────────────────────────────
+    // getPageText() is expensive: it clones the entire document.body, queries
+    // and removes overlay nodes, and extracts innerText. Called 11+ times per
+    // poll tick from various scrapers, this allocated dozens of megabytes per
+    // second — the root cause of the >2GB tab memory growth reported. Solution:
+    // cache the result for the duration of one poll tick. invalidatePollCache()
+    // is called at the top of each poll() so consumers within the same tick
+    // share a single computation, but a stale cache cannot survive past it.
+    let pollTextCache = null;
+    let pollCountdownCache = null;
+    function invalidatePollCache () {
+        pollTextCache = null;
+        pollCountdownCache = null;
+    }
 
     // After refreshing during a RACING session, suppress join-messages and show a
     // "currently racing" summary instead. Set in loadState() when status is RACING.
@@ -528,10 +598,170 @@
     }
 
     // Get the current track's description string from the API cache, or '' if
-    // unavailable. Used by fill() to expand the {trackDesc} token.
+    // unavailable. Used by fill() to expand the {trackDesc} token. Per spec,
+    // the full description text is rate-limited to once every 20 minutes —
+    // see fullDescAllowed() below. Templates that don't quote the full text
+    // (e.g. characteristic-derived flavour lines) are not rate-limited.
     function getCurrentTrackDescription () {
         const info = getTrackInfo(state.track);
         return (info && typeof info.description === 'string') ? info.description : '';
+    }
+
+    // Per spec: "If using the full text of the description, only do it once
+    // every twenty minutes." We track the last time we ran a {trackDesc} line
+    // and gate further uses on that timestamp.
+    const FULL_DESC_GAP_MS = 20 * 60 * 1000;
+    let lastFullDescAt = 0;
+    function fullDescAllowed () {
+        return (Date.now() - lastFullDescAt) >= FULL_DESC_GAP_MS;
+    }
+    function markFullDescUsed () {
+        lastFullDescAt = Date.now();
+    }
+
+    // Detect track characteristics from the description text. Returns a set
+    // of keywords representing the surface, environment, and conditions, used
+    // to gate characteristic-specific commentary lines. The detection is
+    // keyword-based on the description text — simple and robust enough for
+    // typical Torn track descriptions.
+    function getTrackCharacteristics () {
+        const info = getTrackInfo(state.track);
+        if (!info || typeof info.description !== 'string') return {};
+        const desc = info.description.toLowerCase();
+        const tags = {};
+        // Surface
+        if (/\bmud\b|\bmuddy\b|\bdirt\b|\boff[- ]?road\b/.test(desc)) tags.mud = true;
+        if (/\btarmac\b|\basphalt\b|\bsmooth\b|\bpaved\b/.test(desc)) tags.tarmac = true;
+        if (/\bgravel\b|\bgrit\b|\bdusty\b|\bdust\b/.test(desc)) tags.gravel = true;
+        if (/\bsand\b|\bdune\b|\bdesert\b/.test(desc)) tags.sand = true;
+        if (/\bice\b|\bsnow\b|\bfrozen\b|\bfrost\b/.test(desc)) tags.ice = true;
+        if (/\bwater\b|\bwet\b|\brain\b|\bpuddle\b/.test(desc)) tags.wet = true;
+        // Layout / setting
+        if (/\bnarrow\b|\btight\b/.test(desc)) tags.narrow = true;
+        if (/\bwide\b|\bopen\b|\bsweeping\b/.test(desc)) tags.wide = true;
+        if (/\boval\b|\bcircular\b|\bloop\b/.test(desc)) tags.oval = true;
+        if (/\btwist\b|\bturn\b|\bcorner\b|\bbend\b/.test(desc)) tags.twisty = true;
+        if (/\bhill\b|\belevation\b|\bclimb\b|\bdescent\b/.test(desc)) tags.hilly = true;
+        if (/\bjump\b|\bramp\b/.test(desc)) tags.jumps = true;
+        // Environment
+        if (/\bindustrial\b|\bfactory\b|\bwarehouse\b/.test(desc)) tags.industrial = true;
+        if (/\bdock\b|\bharbour\b|\bharbor\b|\bport\b|\bquay\b/.test(desc)) tags.docks = true;
+        if (/\bforest\b|\btree\b|\bwood\b/.test(desc)) tags.forest = true;
+        if (/\bcity\b|\burban\b|\bstreet\b/.test(desc)) tags.city = true;
+        if (/\bcountry\b|\brural\b|\bfarm\b|\bfield\b/.test(desc)) tags.country = true;
+        // Difficulty hints
+        if (/\bdangerous\b|\bbrutal\b|\bpunishing\b|\bunforgiving\b|\btough\b/.test(desc)) tags.brutal = true;
+        if (/\bfast\b|\bhigh[- ]speed\b|\bspeedway\b/.test(desc)) tags.fast = true;
+        if (/\btechnical\b|\bskill\b|\bprecision\b/.test(desc)) tags.technical = true;
+        return tags;
+    }
+
+    // Characteristic-based ambient line pool. Each entry is { tag, lines }
+    // where `tag` is a characteristic key from getTrackCharacteristics() and
+    // `lines` are matching flavour messages. ambientPoolFor merges in lines
+    // for all active tags. These are NOT gated by the 20-min throttle since
+    // they don't quote the full description text.
+    const TRACK_CHARACTERISTIC_LINES = [
+        { tag: 'mud', lines: [
+            'Mud sprays in every direction. Drivers fighting for grip.',
+            'The mud is doing the talking — cars sliding everywhere.',
+            'Tyres caked in mud. Steering inputs need to be smoother than ever.',
+            'A car comes past, its bodywork barely visible under the mud.',
+            'Mechanics will be cursing tonight. Every panel coated in filth.'
+        ]},
+        { tag: 'tarmac', lines: [
+            'Smooth tarmac means the fast cars are in their element.',
+            'On this surface, grip is consistent and lap times tumble.',
+            'Tarmac like a billiard table — no excuses for slow times.',
+            'Cars are hooked up beautifully on this surface.'
+        ]},
+        { tag: 'gravel', lines: [
+            'Gravel kicks up at every braking zone.',
+            'Stones spray from the rear wheels with every corner.',
+            'A dusty haze hangs over the track. Visibility is a constant worry.'
+        ]},
+        { tag: 'sand', lines: [
+            'Sand drifts across the racing line. Treacherous footing.',
+            'Each car leaves a plume of dust behind it.',
+            'Sand in the eyes of any spectator brave enough to stand close.'
+        ]},
+        { tag: 'ice', lines: [
+            'On the ice, even the slightest input matters.',
+            'A car slides wide — ice has no mercy.',
+            'Surface temperatures must be brutal. Tyres struggling for purchase.'
+        ]},
+        { tag: 'wet', lines: [
+            'Spray from the leading cars makes overtaking guesswork.',
+            'A wet line, a dry line — drivers picking their way through.',
+            'Every puddle a potential trip to the wall.'
+        ]},
+        { tag: 'narrow', lines: [
+            'Tight, narrow track — no margin for error here.',
+            'Two abreast is a luxury on this circuit.',
+            'The walls feel like they\'re closing in.'
+        ]},
+        { tag: 'wide', lines: [
+            'Wide enough to take a real run at it. Drivers using every inch.',
+            'Lots of space to set up overtakes here.',
+            'Open layout suits the brave.'
+        ]},
+        { tag: 'twisty', lines: [
+            'Corner after corner — no time to breathe.',
+            'A test of patience as much as speed. The lines are everything.',
+            'The drivers earning every metre through these twists.'
+        ]},
+        { tag: 'fast', lines: [
+            'High-speed running here — engines screaming at their limit.',
+            'Top gear most of the lap. This is flat-out stuff.',
+            'Cars blasting past so fast the crowd feels the wind.'
+        ]},
+        { tag: 'brutal', lines: [
+            'A track that punishes mistakes. Every driver knows it.',
+            'Unforgiving circuit — one error and the race is over.',
+            'Brutal layout, brutal consequences.'
+        ]},
+        { tag: 'industrial', lines: [
+            'Industrial backdrop adds to the atmosphere — and the smell.',
+            'Factory walls echo the engine noise back twice as loud.',
+            'Steel and concrete on every side. No room for sightseeing.'
+        ]},
+        { tag: 'docks', lines: [
+            'The dock cranes loom overhead. A unique stage for racing.',
+            'Salt air, diesel fumes, and the roar of engines.',
+            'You can almost taste the sea between corners.'
+        ]},
+        { tag: 'forest', lines: [
+            'Trees lining the track turn it into a tunnel of green.',
+            'Branches overhead, leaves on the line — a different kind of hazard.',
+            'The forest absorbs some of the noise. Almost peaceful, almost.'
+        ]},
+        { tag: 'city', lines: [
+            'Concrete walls and street furniture — nowhere to put a wheel wrong.',
+            'Urban racing at its most uncompromising.',
+            'Manhole covers and kerbs to think about as well as the corners.'
+        ]},
+        { tag: 'hilly', lines: [
+            'Elevation changes make this one a real challenge.',
+            'A blind crest — the brave commit, the rest lift.',
+            'Going downhill, the brakes are taking a hammering.'
+        ]},
+        { tag: 'jumps', lines: [
+            'A jump ahead — and the brave keep their foot in!',
+            'Suspension takes a pounding off every ramp.',
+            'Wheels off the ground momentarily — pure spectacle.'
+        ]}
+    ];
+
+    // Return the characteristic-based ambient lines that match the current
+    // track's tags. Empty array if no tags detected or no track info available.
+    function characteristicAmbientPool () {
+        const tags = getTrackCharacteristics();
+        if (!tags || Object.keys(tags).length === 0) return [];
+        const pool = [];
+        TRACK_CHARACTERISTIC_LINES.forEach(function (entry) {
+            if (tags[entry.tag]) pool.push.apply(pool, entry.lines);
+        });
+        return pool;
     }
 
     // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -647,20 +877,51 @@
         return chosen;
     }
 
-    // ambientPoolFor returns the ambient line pool for a status, with the
-    // API-flavoured pool (apiAmbient) appended ONLY if a track description
-    // has been fetched from the Torn v2 racing/tracks endpoint and matches
-    // the current track. Without an API key, or before the cache has been
-    // populated, this returns just the built-in ambient pool — so the
-    // commentary degrades gracefully and the user notices no difference.
+    // Map racer count → tier pool name on LINES.RACING. Tier boundaries from
+    // the spec's "NUMBER OF RACERS AFFECTS TYPE OF MESSAGES SHOWN" section.
+    function getRacerCountTierKey () {
+        const n = state.racerCount || state.raceFieldSize || 0;
+        if (n <= 1) return null;
+        if (n <= 6) return 'tierTiny';
+        if (n <= 15) return 'tierSmall';
+        if (n <= 50) return 'tierMedium';
+        if (n <= 75) return 'tierLarge';
+        return 'tierMassive';
+    }
+
+    // ambientPoolFor returns the ambient line pool for a status, with optional
+    // pools merged in based on context:
+    //   - apiAmbient: only when a track description has been fetched from
+    //     api.torn.com (otherwise the templates render as empty/broken).
+    //   - tier pool (RACING only): tier-specific flavour lines keyed by
+    //     racer-count band (2-6 / 7-15 / 16-50 / 51-75 / 76-100).
+    // Without an API key or before the cache populates, this returns just the
+    // built-in ambient plus the relevant tier — so the commentary degrades
+    // gracefully and the user notices no difference if the API is unavailable.
     function ambientPoolFor (statusLines) {
         if (!statusLines || !Array.isArray(statusLines.ambient)) return [];
-        const base = statusLines.ambient;
-        const desc = getCurrentTrackDescription();
-        if (desc && Array.isArray(statusLines.apiAmbient) && statusLines.apiAmbient.length) {
-            return base.concat(statusLines.apiAmbient);
+        let out = statusLines.ambient;
+        // Merge tier pool when present on the LINES section (only RACING has tiers).
+        const tierKey = getRacerCountTierKey();
+        if (tierKey && Array.isArray(statusLines[tierKey]) && statusLines[tierKey].length) {
+            out = out.concat(statusLines[tierKey]);
         }
-        return base;
+        // Merge characteristic-derived pool (mud/tarmac/etc) when description tags
+        // are detected. These are NOT rate-limited because they don't quote the
+        // full description text — they're flavour lines derived from keywords.
+        const charPool = characteristicAmbientPool();
+        if (charPool.length) {
+            out = out.concat(charPool);
+        }
+        // Merge API-flavoured pool only when (a) description available AND
+        // (b) the 20-minute gate is open. The apiAmbient lines DO quote the
+        // full description text, so they're spec-mandated to fire at most
+        // once every 20 minutes.
+        const desc = getCurrentTrackDescription();
+        if (desc && fullDescAllowed() && Array.isArray(statusLines.apiAmbient) && statusLines.apiAmbient.length) {
+            out = out.concat(statusLines.apiAmbient);
+        }
+        return out;
     }
 
     function fill (tpl, extras) {
@@ -919,7 +1180,11 @@
 
         if (st === S.COUNTDOWN) {
             if (now >= tAmbient) {
-                pushLine(fill(pickLine(ambientPoolFor(LINES.COUNTDOWN), 'ambient')), 'ambient');
+                const picked = pickLine(ambientPoolFor(LINES.COUNTDOWN), 'ambient');
+                // If this line uses the full description text, latch the 20-min
+                // throttle so apiAmbient lines can't fire again until it expires.
+                if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
+                pushLine(fill(picked), 'ambient');
                 tAmbient = now + COUNTDOWN_GAP + Math.random() * 30000;
             }
             if (now >= tPlayer) {
@@ -949,7 +1214,9 @@
 
         if (isRacingLike(st)) {
             if (now >= tAmbient) {
-                pushLine(fill(pickLine(ambientPoolFor(LINES.RACING), 'ambient')), 'ambient');
+                const picked = pickLine(ambientPoolFor(LINES.RACING), 'ambient');
+                if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
+                pushLine(fill(picked), 'ambient');
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
             }
             if (now >= tPlayer) {
@@ -1487,7 +1754,15 @@
     const EVENTS_TEXT_PATTERN = /(^|[\s>])\d+(s|m|h|d|w)\s+\S/i;
 
     function getPageText () {
-        if (!document.body) return '';
+        // Per-poll cache: return memoised text if computed already this tick.
+        // The cache is invalidated at the top of poll() so it can never serve
+        // stale data across ticks. This is the primary memory-leak fix —
+        // previously each poll cloned the body ~11 times.
+        if (pollTextCache !== null) return pollTextCache;
+        if (!document.body) {
+            pollTextCache = '';
+            return '';
+        }
         try {
             const clone = document.body.cloneNode(true);
             // Remove our own HUD
@@ -1538,9 +1813,12 @@
                 if (EVENTS_TEXT_PATTERN.test(t)) return false;
                 return true;
             }).join('\n');
+            pollTextCache = raw;
             return raw;
         } catch (_) {
-            return document.body.innerText || '';
+            const fallback = document.body.innerText || '';
+            pollTextCache = fallback;
+            return fallback;
         }
     }
 
@@ -1557,16 +1835,21 @@
     // "Race will Start in X" pattern first, then the COUNTDOWN long-form
     // duration pattern. Returns null if neither is found.
     function scrapeCountdown () {
+        if (pollCountdownCache !== undefined && pollCountdownCache !== null) {
+            return pollCountdownCache === '__null__' ? null : pollCountdownCache;
+        }
         try {
             const text = getPageText();
             // PRE-LAUNCH: "Race will Start in 1 minute 48 seconds" / "...48 seconds"
             const m1 = text.match(/Race\s+will\s+Start\s+in\s+([^.\n\r]+?seconds?)/i);
-            if (m1) return m1[1].trim();
+            if (m1) { pollCountdownCache = m1[1].trim(); return pollCountdownCache; }
             // COUNTDOWN: "Docks - 100 laps - 1 hours, 17 minutes, 10 seconds"
             const m2 = text.match(/-\s+\d+\s+laps?\s+-\s+([^.\n\r]+?seconds?)/i);
-            if (m2) return m2[1].trim();
+            if (m2) { pollCountdownCache = m2[1].trim(); return pollCountdownCache; }
+            pollCountdownCache = '__null__';
             return null;
         } catch (_) {
+            pollCountdownCache = '__null__';
             return null;
         }
     }
@@ -1966,6 +2249,10 @@
 
     // ─── Main poll ────────────────────────────────────────────────────────────────
     function poll () {
+        // Reset the per-poll cache so getPageText/scrapeCountdown each compute
+        // exactly once per tick instead of per-call. See pollTextCache for
+        // memory-leak background.
+        invalidatePollCache();
         const newName = scrapeName();
         const newTrack = scrapeTrack();
         const newCar = scrapeCar();
@@ -2201,32 +2488,6 @@
         btn.classList.toggle('tc-btn-active', commentaryPaused);
     }
 
-    function updateFixBtn () {
-        const btn = document.getElementById('tc-btn-fix');
-        if (!btn) return;
-        btn.textContent = state.windowFixed ? '\u229E Float' : '\u229F Fix';
-        btn.classList.toggle('tc-btn-active', state.windowFixed);
-        const hud = document.getElementById('tc-rc-hud');
-        if (hud) {
-            if (state.windowFixed) {
-                hud.classList.add('tc-fixed');
-                // Strip inline position/size so the .tc-fixed CSS rule fully takes effect
-                hud.style.left = '';
-                hud.style.top = '';
-                hud.style.right = '';
-                hud.style.width = '';
-                hud.style.height = '';
-            } else {
-                hud.classList.remove('tc-fixed');
-                // Restore persisted floating-mode position and size
-                if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
-                if (state.windowTop) { hud.style.top = state.windowTop; }
-                if (state.windowWidth) { hud.style.width = state.windowWidth; }
-                if (state.windowHeight) { hud.style.height = state.windowHeight; }
-            }
-        }
-    }
-
     function setMinimised (min) {
         isMinimised = min;
         const hud = document.getElementById('tc-rc-hud');
@@ -2249,7 +2510,6 @@
         let ox = 0, oy = 0, sl = 0, st = 0, dragging = false;
         handleEl.addEventListener('mousedown', function (e) {
             if (e.target.tagName === 'BUTTON') return;
-            if (state.windowFixed) return;
             dragging = true; ox = e.clientX; oy = e.clientY;
             const r = hudEl.getBoundingClientRect(); sl = r.left; st = r.top;
             e.preventDefault();
@@ -2277,10 +2537,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700&display=swap');
 #tc-rc-hud{--c-gold:#f5c030;--c-blue:#6ec4ff;--c-green:#4ee87a;--c-purple:#d090ff;--c-orange:#ffaa50;--c-red:#ff6666;--c-white:#f0f4fa;--c-mid:#b0c0d0;--c-muted:#8a9db8;--c-dim:#6a7d94;--c-bg:#07090f;--c-bg2:#060810;--c-border:#202840;--c-border2:#181e30;}
 #tc-rc-hud{position:fixed;top:4vh;right:18px;width:340px;height:75vh;min-width:260px;max-width:520px;background:var(--c-bg);border:1px solid var(--c-border);border-top:3px solid var(--c-gold);border-radius:5px;box-shadow:0 20px 70px rgba(0,0,0,.92);font-family:'Barlow Condensed',sans-serif;color:var(--c-mid);z-index:999999;display:flex;flex-direction:column;overflow:hidden;resize:both;user-select:none;}
-#tc-rc-hud.tc-fixed{position:relative;top:auto;right:auto;left:auto;width:100%;max-width:100%;height:auto;min-height:60vh;border-radius:0;box-shadow:none;resize:vertical;z-index:10;}
 #tc-rc-drag{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 5px;background:linear-gradient(90deg,#0c0f1c 0%,#111628 100%);border-bottom:1px solid var(--c-border);cursor:grab;flex-shrink:0;}
 #tc-rc-drag:active{cursor:grabbing;}
-#tc-rc-hud.tc-fixed #tc-rc-drag{cursor:default;}
 .tc-title-text{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--c-gold);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .tc-hdr-btns{display:flex;gap:4px;flex-shrink:0;margin-left:8px;}
 .tc-hdr-btns button{background:rgba(255,255,255,.05);border:1px solid #2a3050;color:var(--c-muted);width:20px;height:20px;border-radius:3px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .15s,color .15s,border-color .15s;}
@@ -2468,17 +2726,15 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
   <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
   <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
   <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
-  <button id="tc-btn-fix" class="tc-foot-btn">&#8862; Fix</button>
   <span id="tc-live-dot"></span>
 </div>`;
         document.body.appendChild(hud);
-        // Restore persisted window position and size (floating mode only)
-        if (!state.windowFixed) {
-            if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
-            if (state.windowTop) { hud.style.top = state.windowTop; }
-            if (state.windowWidth) { hud.style.width = state.windowWidth; }
-            if (state.windowHeight) { hud.style.height = state.windowHeight; }
-        }
+        // Restore persisted window position and size. Fix Button was removed
+        // in v2.62 (per spec); the window is always floating now, so no guard.
+        if (state.windowLeft) { hud.style.left = state.windowLeft; hud.style.right = 'auto'; }
+        if (state.windowTop) { hud.style.top = state.windowTop; }
+        if (state.windowWidth) { hud.style.width = state.windowWidth; }
+        if (state.windowHeight) { hud.style.height = state.windowHeight; }
         makeDraggable(hud, document.getElementById('tc-rc-drag'));
         document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
         document.getElementById('tc-btn-settings').addEventListener('click', function () {
@@ -2556,13 +2812,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             }
             updatePauseBtn();
         });
-        document.getElementById('tc-btn-fix').addEventListener('click', function () {
-            state.windowFixed = !state.windowFixed;
-            updateFixBtn();
-            saveState();
-        });
         updatePauseBtn();
-        updateFixBtn();
         if (typeof ResizeObserver !== 'undefined') {
             let lastSavedW = '', lastSavedH = '';
             const ro = new ResizeObserver(function () {
@@ -2575,19 +2825,15 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                     if (nearBottom) el.scrollTop = el.scrollHeight;
                 }
                 // Persist resized HUD dimensions when the user manually resizes.
-                // Only meaningful in floating mode; in fixed mode the HUD width
-                // is forced to 100% via CSS so we skip that case.
-                if (!state.windowFixed) {
-                    const r = hud.getBoundingClientRect();
-                    const w = Math.round(r.width) + 'px';
-                    const h = Math.round(r.height) + 'px';
-                    if (w !== lastSavedW || h !== lastSavedH) {
-                        lastSavedW = w; lastSavedH = h;
-                        state.windowWidth = w;
-                        state.windowHeight = h;
-                        // Don't call saveState() here on every observer fire — the next
-                        // poll() tick will pick it up via its own saveState().
-                    }
+                const r = hud.getBoundingClientRect();
+                const w = Math.round(r.width) + 'px';
+                const h = Math.round(r.height) + 'px';
+                if (w !== lastSavedW || h !== lastSavedH) {
+                    lastSavedW = w; lastSavedH = h;
+                    state.windowWidth = w;
+                    state.windowHeight = h;
+                    // Don't call saveState() here on every observer fire — the next
+                    // poll() tick will pick it up via its own saveState().
                 }
             });
             ro.observe(hud);
