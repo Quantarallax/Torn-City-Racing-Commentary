@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.60.0
+// @version      2.61.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -11,6 +11,8 @@
 // @match        https://www.torn.com/page.php*sid=racing*
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @connect      api.torn.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -19,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.60.0';
+    const SCRIPT_VERSION = '2.61.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -35,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v69';
+    const STORAGE_KEY = 'tc_racecomm_v70';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -50,6 +52,19 @@
     const STALE_NAME_LEAK_PATTERN = /^\s*(Position|Name|Player|Track|Car|Lap|Last|Status|Score|Points|Driver|Racer|Class|Time|Rank|Place|None|Unknown|Loading)\s+(has\s+joined|rolls\s+onto|drives\s+onto|joins|crosses|attempts|is\s+|appears|pulls|swerves|bumps|scrapes|fiddles|honks|revs|starts|moves|sits|threads)/i;
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
+
+    // ─── Track API integration ────────────────────────────────────────────────────
+    // Per spec: hit https://api.torn.com/v2/racing/tracks and match the scraped
+    // track name against each record's `title`, then use the `description` to
+    // flavour ambient commentary. Requires a Torn API key (Public Access tier
+    // is sufficient — track data is public information). The key is stored
+    // locally via GM_setValue and NEVER transmitted anywhere except api.torn.com.
+    const API_KEY_STORAGE = 'tc_racecomm_api_key';
+    const TRACKS_CACHE_STORAGE = 'tc_racecomm_tracks_cache';
+    const TRACKS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week — track data rarely changes
+    // tracksCache schema: { fetchedAt: <epoch ms>, tracks: [{title, description, ...}] }
+    let tracksCache = null;
+    let tracksFetchInFlight = false;
 
     // ─── SVG Icons ───────────────────────────────────────────────────────────────
     const ICON = {
@@ -148,6 +163,16 @@
                 '{p2} checks their weapons.',
                 '{track} can be daunting in amateur hands.'
             ],
+            // API-flavoured lines: use the description text fetched from
+            // https://api.torn.com/v2/racing/tracks. Only merged into the
+            // active pool when getCurrentTrackDescription() returns non-empty.
+            apiAmbient: [
+                'For those joining us, {track} — {trackDesc}',
+                'A reminder for the newcomers: {trackDesc}',
+                'The track guide says it all — {trackDesc}',
+                'Worth noting on {track}: {trackDesc}',
+                'They say of {track} — {trackDesc}'
+            ],
             player: [
                 '{player} has settled into {pos} and holds their nerve.',
                 '{player} locked in and ready. Grid position secured.',
@@ -208,6 +233,16 @@
                 "It's crazy today!",
                 'Looking forwards to how this race goes.',
                 'The crowd pushes forward, onto the track while the cars blast past.'
+            ],
+            // API-flavoured RACING ambient — uses {trackDesc} from the Torn
+            // tracks endpoint, merged into the active pool only when the
+            // description has been fetched and cached.
+            apiAmbient: [
+                'Remember this is {track} — {trackDesc}',
+                'For those tuning in late: {trackDesc}',
+                '{track} demands respect. As the briefing puts it — {trackDesc}',
+                'Worth bearing in mind on {track} — {trackDesc}',
+                'Every driver here knows what {track} can do — {trackDesc}'
             ],
             player: [
                 '{player} sits in {pos}, keeping it clean and consistent.',
@@ -375,6 +410,130 @@
     // "currently racing" summary instead. Set in loadState() when status is RACING.
     let restoredIntoRacing = false;
 
+    // ─── Torn API client (track data) ─────────────────────────────────────────────
+    // Read the user's stored API key. Returns null if none set.
+    function getApiKey () {
+        try {
+            const k = GM_getValue(API_KEY_STORAGE, '');
+            return (typeof k === 'string' && k.trim()) ? k.trim() : null;
+        } catch (_) { return null; }
+    }
+
+    // Store the user's API key. Trimmed; empty string clears.
+    function setApiKey (key) {
+        try {
+            GM_setValue(API_KEY_STORAGE, (key || '').trim());
+            // Invalidate the cached tracks payload so next fetch uses the new key.
+            tracksCache = null;
+            try { GM_setValue(TRACKS_CACHE_STORAGE, ''); } catch (_) {}
+        } catch (_) {}
+    }
+
+    // Load cached tracks payload from storage. Returns the payload if still
+    // within TTL, or null if absent/expired/corrupt.
+    function loadTracksCache () {
+        try {
+            const raw = GM_getValue(TRACKS_CACHE_STORAGE, '');
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.fetchedAt || !Array.isArray(parsed.tracks)) return null;
+            if ((Date.now() - parsed.fetchedAt) > TRACKS_CACHE_TTL_MS) return null;
+            return parsed;
+        } catch (_) { return null; }
+    }
+
+    function saveTracksCache (tracks) {
+        try {
+            const payload = { fetchedAt: Date.now(), tracks: tracks };
+            GM_setValue(TRACKS_CACHE_STORAGE, JSON.stringify(payload));
+            tracksCache = payload;
+        } catch (_) {}
+    }
+
+    // Fetch the racing tracks list from the Torn v2 API. Idempotent: if a
+    // request is already in flight we don't fire another. On success the cache
+    // is updated. Failures are silent — the script falls back to its built-in
+    // commentary pool, so the user notices nothing if the API is unreachable
+    // or the key is invalid.
+    function fetchTracksFromApi () {
+        if (tracksFetchInFlight) return;
+        const key = getApiKey();
+        if (!key) return;
+        // GM_xmlhttpRequest is the Tampermonkey cross-origin XHR — works
+        // around CORS so a script on torn.com can call api.torn.com.
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+        tracksFetchInFlight = true;
+        try {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://api.torn.com/v2/racing/tracks?key=' + encodeURIComponent(key),
+                timeout: 15000,
+                onload: function (resp) {
+                    tracksFetchInFlight = false;
+                    try {
+                        if (resp.status !== 200) {
+                            console.warn('[TC Race Commentary] tracks API non-200:', resp.status);
+                            return;
+                        }
+                        const json = JSON.parse(resp.responseText || '{}');
+                        // Torn API returns errors with shape { error: { code, error } }
+                        if (json.error) {
+                            console.warn('[TC Race Commentary] tracks API error:', json.error);
+                            return;
+                        }
+                        // The v2 endpoint returns { tracks: [...] }. Each entry
+                        // should have at least { title, description }. We store
+                        // the full list and look up by title at use time.
+                        const list = (json.tracks && Array.isArray(json.tracks)) ? json.tracks : [];
+                        if (list.length) {
+                            saveTracksCache(list);
+                        }
+                    } catch (e) {
+                        console.warn('[TC Race Commentary] tracks API parse:', e);
+                    }
+                },
+                onerror: function () {
+                    tracksFetchInFlight = false;
+                },
+                ontimeout: function () {
+                    tracksFetchInFlight = false;
+                }
+            });
+        } catch (e) {
+            tracksFetchInFlight = false;
+            console.warn('[TC Race Commentary] tracks API request failed:', e);
+        }
+    }
+
+    // Return the cached track record matching the given title (case-insensitive,
+    // trimmed), or null if not present. Triggers a background refresh if the
+    // cache is missing/stale.
+    function getTrackInfo (title) {
+        if (!title || title === '—') return null;
+        if (!tracksCache) tracksCache = loadTracksCache();
+        if (!tracksCache) {
+            // No cache — fire a fetch, but return null right now (the next
+            // poll will benefit from the fresh data).
+            fetchTracksFromApi();
+            return null;
+        }
+        const t = title.trim().toLowerCase();
+        for (let i = 0; i < tracksCache.tracks.length; i++) {
+            const rec = tracksCache.tracks[i];
+            if (rec && rec.title && rec.title.trim().toLowerCase() === t) {
+                return rec;
+            }
+        }
+        return null;
+    }
+
+    // Get the current track's description string from the API cache, or '' if
+    // unavailable. Used by fill() to expand the {trackDesc} token.
+    function getCurrentTrackDescription () {
+        const info = getTrackInfo(state.track);
+        return (info && typeof info.description === 'string') ? info.description : '';
+    }
+
     // ─── Persistence ─────────────────────────────────────────────────────────────
     function loadState () {
         try {
@@ -488,6 +647,22 @@
         return chosen;
     }
 
+    // ambientPoolFor returns the ambient line pool for a status, with the
+    // API-flavoured pool (apiAmbient) appended ONLY if a track description
+    // has been fetched from the Torn v2 racing/tracks endpoint and matches
+    // the current track. Without an API key, or before the cache has been
+    // populated, this returns just the built-in ambient pool — so the
+    // commentary degrades gracefully and the user notices no difference.
+    function ambientPoolFor (statusLines) {
+        if (!statusLines || !Array.isArray(statusLines.ambient)) return [];
+        const base = statusLines.ambient;
+        const desc = getCurrentTrackDescription();
+        if (desc && Array.isArray(statusLines.apiAmbient) && statusLines.apiAmbient.length) {
+            return base.concat(statusLines.apiAmbient);
+        }
+        return base;
+    }
+
     function fill (tpl, extras) {
         // Defensive: if state.playerName is somehow the placeholder dash, empty,
         // or a UI-label word, fall back to a generic word rather than letting
@@ -507,7 +682,13 @@
             p3: state.racers[2] ? state.racers[2].name : '—',
             last: state.racers.length > 0 ? state.racers[state.racers.length - 1].name : '—',
             total: String(state.racerCount || state.racers.length || '?'),
-            countdown: scrapeCountdown() || 'a few moments'
+            countdown: scrapeCountdown() || 'a few moments',
+            // {trackDesc} comes from the Torn v2 API /racing/tracks endpoint
+            // matched by title. Empty string if no API key set or not yet
+            // cached — template lines that use this should be authored to
+            // remain readable even with an empty value, or be gated to only
+            // appear when the description is available.
+            trackDesc: getCurrentTrackDescription()
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
             // If a template token is unknown, return the original {token}
@@ -738,7 +919,7 @@
 
         if (st === S.COUNTDOWN) {
             if (now >= tAmbient) {
-                pushLine(fill(pickLine(LINES.COUNTDOWN.ambient, 'ambient')), 'ambient');
+                pushLine(fill(pickLine(ambientPoolFor(LINES.COUNTDOWN), 'ambient')), 'ambient');
                 tAmbient = now + COUNTDOWN_GAP + Math.random() * 30000;
             }
             if (now >= tPlayer) {
@@ -768,7 +949,7 @@
 
         if (isRacingLike(st)) {
             if (now >= tAmbient) {
-                pushLine(fill(pickLine(LINES.RACING.ambient, 'ambient')), 'ambient');
+                pushLine(fill(pickLine(ambientPoolFor(LINES.RACING), 'ambient')), 'ambient');
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
             }
             if (now >= tPlayer) {
@@ -2170,6 +2351,14 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 #tc-rc-settings{display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;padding:20px 18px;flex:1;overflow-y:auto;}
 .tc-set-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--c-gold);letter-spacing:.1em;text-align:center;margin-bottom:6px;width:100%;}
 .tc-set-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--c-border2);border-radius:3px;width:100%;box-sizing:border-box;}
+.tc-set-row-stack{flex-direction:column;align-items:stretch;}
+.tc-set-row-stack .tc-set-lbl{margin-bottom:6px;}
+.tc-api-row{display:flex;gap:6px;align-items:center;}
+.tc-api-input{flex:1;min-width:0;background:rgba(0,0,0,.5);border:1px solid var(--c-border2);color:var(--c-fg);padding:5px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;border-radius:3px;letter-spacing:.04em;}
+.tc-api-input:focus{outline:1px solid var(--c-gold);border-color:var(--c-gold);}
+#tc-api-status{margin-top:6px;font-size:11px;}
+#tc-api-status.tc-ok{color:var(--c-green);}
+#tc-api-status.tc-err{color:var(--c-red);}
 .tc-set-divider{width:100%;height:1px;background:var(--c-border2);margin:14px 0 6px;}
 .tc-set-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:600;color:var(--c-mid);letter-spacing:.04em;}
 .tc-set-hint{font-family:'Barlow Condensed',sans-serif;font-size:11px;color:var(--c-dim);line-height:1.6;padding:4px 4px;width:100%;text-align:left;}
@@ -2257,6 +2446,22 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       Down: newest messages appear at the bottom, older scroll up.<br>
       Up: newest messages appear at the top, older scroll down.
     </div>
+    <div class="tc-set-divider"></div>
+    <div class="tc-set-row tc-set-row-stack">
+      <span class="tc-set-lbl">Torn API key (optional)</span>
+      <div class="tc-api-row">
+        <input id="tc-api-key" class="tc-api-input" type="password" placeholder="16-char API key" autocomplete="off" spellcheck="false" />
+        <button id="tc-api-save" class="tc-foot-btn">Save</button>
+      </div>
+      <div id="tc-api-status" class="tc-set-hint"></div>
+    </div>
+    <div class="tc-set-hint">
+      A Public Access key is enough — racing track data is public.
+      Stored only in Tampermonkey on this device. Enables track-description
+      flavour lines pulled live from <code>api.torn.com/v2/racing/tracks</code>.
+      Leave blank to disable. Get a key at
+      <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener" style="color:var(--c-blue);">torn.com/preferences#api</a>.
+    </div>
   </div>
 </div>
 <div id="tc-rc-footer">
@@ -2296,6 +2501,50 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             updateScrollDirBtn();
             saveState();
         });
+        // API key handling — populate the input with the currently-stored key
+        // (masked because the input is type="password") and wire the Save button.
+        const apiInput = document.getElementById('tc-api-key');
+        const apiStatus = document.getElementById('tc-api-status');
+        const apiSave = document.getElementById('tc-api-save');
+        if (apiInput && apiSave && apiStatus) {
+            const existing = getApiKey();
+            if (existing) {
+                apiInput.value = existing;
+                apiStatus.className = 'tc-set-hint tc-ok';
+                apiStatus.textContent = 'Key set. Track-flavour lines active when cache populates.';
+            }
+            apiSave.addEventListener('click', function () {
+                const val = (apiInput.value || '').trim();
+                if (!val) {
+                    setApiKey('');
+                    apiStatus.className = 'tc-set-hint';
+                    apiStatus.textContent = 'Key cleared. Track-flavour lines disabled.';
+                    return;
+                }
+                // Light client-side sanity check. Torn keys are 16 alphanumeric chars.
+                if (!/^[A-Za-z0-9]{16}$/.test(val)) {
+                    apiStatus.className = 'tc-set-hint tc-err';
+                    apiStatus.textContent = 'That does not look like a 16-character Torn API key.';
+                    return;
+                }
+                setApiKey(val);
+                apiStatus.className = 'tc-set-hint tc-ok';
+                apiStatus.textContent = 'Saved. Fetching tracks…';
+                // Trigger an immediate fetch so the user sees the cache populate.
+                fetchTracksFromApi();
+                // Re-check the cache after a short delay to give the user feedback.
+                setTimeout(function () {
+                    if (!apiStatus) return;
+                    if (tracksCache && tracksCache.tracks && tracksCache.tracks.length) {
+                        apiStatus.className = 'tc-set-hint tc-ok';
+                        apiStatus.textContent = 'Saved. ' + tracksCache.tracks.length + ' tracks cached.';
+                    } else {
+                        apiStatus.className = 'tc-set-hint';
+                        apiStatus.textContent = 'Saved. Cache will populate on next API call.';
+                    }
+                }, 2500);
+            });
+        }
         document.getElementById('tc-btn-pause').addEventListener('click', function () {
             commentaryPaused = !commentaryPaused;
             // Show a status message confirming the toggle. Status messages always
@@ -2384,6 +2633,9 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             updatePauseBtn();
             updateScrollDirBtn();
             resetTimers();
+            // Warm the tracks cache on startup so apiAmbient lines become
+            // available as soon as possible. If no key is set, this no-ops.
+            try { fetchTracksFromApi(); } catch (_) {}
         } catch (e) {
             // If init fails, log loudly but still try to build the HUD so the
             // user sees *something* and can report what went wrong. A thrown
