@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.63.0
+// @version      2.64.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.63.0';
+    const SCRIPT_VERSION = '2.64.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v72';
+    const STORAGE_KEY = 'tc_racecomm_v73';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -296,6 +296,28 @@
                 'A swarm of cars. Survival as much as speed.',
                 'Total mayhem. Every gap closes the moment it opens.'
             ],
+            // Lap-time commentary pool (per spec v2.64). Fires when the lap
+            // number advances (second lap onwards — we need a previous lap to
+            // report). Templates use {lapTime} for the just-completed lap and
+            // {lapNum} for the lap number that was completed. The line is
+            // selected once per lap change; the dedupe machinery in pickLine
+            // keeps the phrasings varied.
+            lapTime: [
+                '{player} completes lap {lapNum} in {lapTime}.',
+                'A {lapTime} for {player} on lap {lapNum}. Steady work.',
+                'Lap {lapNum} done — {lapTime} for {player}.',
+                "{player}'s last lap: {lapTime}. Lap {lapNum} on the board.",
+                'Through lap {lapNum} in {lapTime}. {player} keeping the rhythm.',
+                'That was {lapTime} for {player}. Lap {lapNum} ticked off.',
+                '{player} clocks {lapTime} for lap {lapNum}. Holding {pos}.',
+                'Lap {lapNum} in {lapTime} — {player} on the move.',
+                '{lapTime} on the boards for {player}. Lap {lapNum} complete.',
+                'A {lapTime} from {player} that time. Lap {lapNum} done.',
+                'Splits show {player} round in {lapTime} for lap {lapNum}.',
+                "{player} crosses the line for lap {lapNum}. {lapTime}.",
+                'Another lap down for {player} — {lapTime} on lap {lapNum}.',
+                '{lapTime} this time for {player}. Working on lap {lapNum} now.'
+            ],
             player: [
                 '{player} sits in {pos}, keeping it clean and consistent.',
                 '{player} threads every corner in the {car}. A measured drive.',
@@ -404,6 +426,11 @@
         outroShown: false,
         lastLap: '—',
         currentLap: '—',
+        // prevLapNumber: the lap number we last saw on this race. Used to
+        // detect transitions to a new lap so we can fire lap-time commentary
+        // (see LINES.RACING.lapTime). Resets to 0 on new race entry. Per spec
+        // the lap-time line fires from the second lap onwards.
+        prevLapNumber: 0,
         completion: '—',
         // Fix Button removed in v2.62 — windowFixed is no longer used but
         // remains as a placeholder to keep persisted-state compatibility with
@@ -798,6 +825,7 @@
             state.outroShown = p.outroShown || false;
             state.lastLap = p.lastLap || '—';
             state.currentLap = p.currentLap || '—';
+            state.prevLapNumber = p.prevLapNumber || 0;
             state.completion = p.completion || '—';
             state.windowFixed = p.windowFixed || false;
             state.windowLeft = p.windowLeft || '';
@@ -858,6 +886,7 @@
                 outroShown: state.outroShown,
                 lastLap: state.lastLap,
                 currentLap: state.currentLap,
+                prevLapNumber: state.prevLapNumber,
                 completion: state.completion,
                 windowFixed: state.windowFixed,
                 windowLeft: state.windowLeft,
@@ -958,7 +987,13 @@
             // cached — template lines that use this should be authored to
             // remain readable even with an empty value, or be gated to only
             // appear when the description is available.
-            trackDesc: getCurrentTrackDescription()
+            trackDesc: getCurrentTrackDescription(),
+            // Last lap time (e.g. "00:27") and the lap number it represents.
+            // {lapTime} resolves to the most recent lastLap, {lapNum} to the
+            // lap number that lapTime corresponds to (i.e. the lap that was
+            // just completed). Used by LINES.RACING.lapTime templates.
+            lapTime: (state.lastLap && state.lastLap !== '—') ? state.lastLap : 'a respectable time',
+            lapNum: state.prevLapNumber > 0 ? state.prevLapNumber : '?'
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
             // If a template token is unknown, return the original {token}
@@ -1491,6 +1526,7 @@
                 state.prevRacers = [];
                 state.racerCount = 0;
                 state.raceFieldSize = 0;
+                state.prevLapNumber = 0;
 
                 // Repopulate knownRacerNames with the racers that were already on the
                 // track when the player joined. This means only genuinely NEW arrivals
@@ -2358,6 +2394,38 @@
             if (ll) state.lastLap = ll;
             if (cl) state.currentLap = cl;
             if (co && state.completion !== '100%') state.completion = formatCompletion(co);
+
+            // Lap-time commentary (per spec v2.64): when the lap number
+            // advances, fire one line from LINES.RACING.lapTime with the
+            // just-completed lap time. Only fires from lap 2 onwards — we
+            // need a previous lap to report a time for. Restricted to
+            // RACING/RACE_REPLAY so we don't spam in countdown/pre-launch.
+            if (cl && isRacingLike(newStatus)) {
+                // currentLap is in "47/100" form; we want just the leading number.
+                const parts = cl.split('/');
+                const lapNumNow = parseInt(parts[0], 10);
+                if (lapNumNow > 0 && lapNumNow > state.prevLapNumber) {
+                    // The lap that was just completed is prevLapNumber (the
+                    // number before the change). For the first lap completion
+                    // (prevLapNumber === 1 transitions to lapNumNow === 2),
+                    // fire the line. Only suppress when prevLapNumber === 0
+                    // which means we're seeing the very first lap come in.
+                    if (state.prevLapNumber >= 1
+                        && state.lastLap && state.lastLap !== '—'
+                        && !commentaryPaused) {
+                        // The lap number reported is the one that was just
+                        // completed — i.e. state.prevLapNumber (because lap N
+                        // having a time means lap N was the one just finished).
+                        // We pick the line BEFORE updating prevLapNumber so the
+                        // fill() {lapNum} token reflects the completed lap.
+                        try {
+                            const picked = pickLine(LINES.RACING.lapTime, 'lapTime');
+                            pushLine(fill(picked), 'lapTime');
+                        } catch (e) { console.error('[TC RC] lap-time:', e); }
+                    }
+                    state.prevLapNumber = lapNumNow;
+                }
+            }
         } else {
             state.lastLap = '—';
             state.currentLap = '—';
