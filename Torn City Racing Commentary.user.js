@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.69.0
+// @version      2.70.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.69.0';
+    const SCRIPT_VERSION = '2.70.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v78';
+    const STORAGE_KEY = 'tc_racecomm_v79';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -2495,7 +2495,20 @@
         // but gets a distinct status label. Detected by the "Race Replay" page
         // marker. Checked BEFORE the live-race detection so a replay isn't
         // mistaken for an in-progress race.
-        if (/race\s+replay/i.test(text) || document.querySelector('[class*="raceReplay"], [class*="race-replay"]')) {
+        //
+        // Bug fix v2.70: a paused replay swaps the page text from
+        // "Race replaying" to "Race paused" (per spec clarification — "the
+        // text shown is 'Race paused' instead of 'Race replaying'"). With
+        // only the "race replay" check, the paused state fell through to
+        // RACING and the auto-pause detection (gated on RACE_REPLAY) never
+        // fired. We now also treat "Race paused" as a replay marker so the
+        // status stays RACE_REPLAY through the pause and the pause-detect
+        // block in poll() picks it up and surfaces "Replay Paused". Note
+        // that "Race paused" is specific enough to only appear in the
+        // replay context — no risk of false-matching during a live race.
+        if (/race\s+replay/i.test(text)
+                || /\brace\s+paused\b/i.test(text)
+                || document.querySelector('[class*="raceReplay"], [class*="race-replay"]')) {
             return S.RACE_REPLAY;
         }
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
