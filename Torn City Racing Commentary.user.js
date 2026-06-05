@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.71.0
+// @version      2.72.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.71.0';
+    const SCRIPT_VERSION = '2.72.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v80';
+    const STORAGE_KEY = 'tc_racecomm_v81';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -1853,7 +1853,7 @@
             // Jail: single line, then no further commentary until the page
             // returns to a normal status. Per spec v2.71 — plain text, no
             // hyperlink (unlike HOSPITAL).
-            pushLine('You are in jail, no racing at the moment for you.', 'status', '', true);
+            pushLine('You are in jail, no access to racing right now.', 'status', '', true);
         }
         if (newSt === S.TIMED_OUT && oldSt !== S.TIMED_OUT) {
             clearFeed();
@@ -2873,7 +2873,7 @@
             [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
             [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' },
             [S.HOSPITAL]: { label: 'HOSPITAL', cls: 'st-hospital' },
-            [S.JAIL]: { label: 'JAIL', cls: 'st-jail' },
+            [S.JAIL]: { label: 'IN JAIL', cls: 'st-jail' },
             [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' },
             [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
