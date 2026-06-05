@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.65.0
+// @version      2.66.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.65.0';
+    const SCRIPT_VERSION = '2.66.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v74';
+    const STORAGE_KEY = 'tc_racecomm_v75';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -303,21 +303,39 @@
                 'A swarm of cars. Survival as much as speed.',
                 'Total mayhem. Every gap closes the moment it opens.'
             ],
-            // Lap-time commentary pools (per spec v2.65). NOT fired every lap;
-            // cadence is randomly rolled per state.nextLapMsgAt:
-            //   - Long races (50-100 laps): every 8-12 laps
-            //   - Short/medium races (2-49 laps): every 2-6 laps
-            //   - Small races: same rules — the per-lap message from v2.64 has
-            //     been replaced by these cadenced comparison lines.
-            // Two sub-pools picked by context:
-            //   lapTimeFaster:  current lap was quicker than the previous one
-            //   lapTimeSlower:  current lap was slower than the previous one
-            //   lapTimeSame:    near-identical (within ~0.5s) — rare middle case
-            //   lapTimeAverage: occasional running-average line (max 25% of
-            //                   total race laps)
-            // {lapTime} = just-completed lap time (e.g. "00:27"), {lapNum} =
-            // its lap number, {delta} = absolute seconds difference vs the
-            // previous lap (only used in faster/slower templates).
+            // Lap-time commentary pools (per spec v2.66). DEFAULTS to firing
+            // every lap from lap 2 onwards. On every lap the script picks
+            // *some* lap-time line:
+            //   - lapTimeBasic (default):  "{player} completes lap N in TT".
+            //     Used for the majority of laps — the every-lap baseline.
+            //   - lapTimeFaster/Slower/Same (comparison): used at cadenced
+            //     intervals, layered ON TOP of the default — replacing the
+            //     basic line at those eligible laps.
+            //       50-100 laps → every 8-12 laps (random)
+            //       2-49 laps   → every 2-6 laps (random)
+            //   - lapTimeAverage: occasional, capped at 25% of total laps.
+            //     Only fires on eligible comparison laps (replaces comparison).
+            // Tokens used:
+            //   {lapTime} = just-completed lap time (e.g. "00:27")
+            //   {lapNum}  = its lap number
+            //   {delta}   = abs seconds difference vs the previous lap
+            //   {avgTime} = running average so far (formatted as MM:SS)
+            lapTimeBasic: [
+                '{player} completes lap {lapNum} in {lapTime}.',
+                'A {lapTime} for {player} on lap {lapNum}. Steady work.',
+                'Lap {lapNum} done — {lapTime} for {player}.',
+                "{player}'s last lap: {lapTime}. Lap {lapNum} on the board.",
+                'Through lap {lapNum} in {lapTime}. {player} keeping the rhythm.',
+                'That was {lapTime} for {player}. Lap {lapNum} ticked off.',
+                '{player} clocks {lapTime} for lap {lapNum}. Holding {pos}.',
+                'Lap {lapNum} in {lapTime} — {player} on the move.',
+                '{lapTime} on the boards for {player}. Lap {lapNum} complete.',
+                'A {lapTime} from {player} that time. Lap {lapNum} done.',
+                'Splits show {player} round in {lapTime} for lap {lapNum}.',
+                '{player} crosses the line for lap {lapNum}. {lapTime}.',
+                'Another lap down for {player} — {lapTime} on lap {lapNum}.',
+                '{lapTime} this time for {player}. Working on lap {lapNum} now.'
+            ],
             lapTimeFaster: [
                 "{player} chops {delta}s off the previous lap — {lapTime} for lap {lapNum}.",
                 "Quicker by {delta}s — {player} round in {lapTime} on lap {lapNum}.",
@@ -2521,11 +2539,14 @@
             if (cl) state.currentLap = cl;
             if (co && state.completion !== '100%') state.completion = formatCompletion(co);
 
-            // Lap-time commentary (per spec v2.65): cadenced comparison lines
-            // (faster/slower vs the previous lap) plus an occasional running
-            // average. Cadence depends on race length — see rollLapMessageGap.
-            // Only fires from lap 2 onwards (need a previous lap to report).
-            // Restricted to RACING/RACE_REPLAY.
+            // Lap-time commentary (per spec v2.66). DEFAULTS to firing every
+            // lap from lap 2 onwards with a basic "completed lap N in TT" line.
+            // At cadenced intervals (8-12 laps for 50+ races, 2-6 laps for
+            // shorter races) the message UPGRADES to a comparison (faster/
+            // slower/same vs the previous lap). Occasionally, an eligible
+            // comparison lap UPGRADES further to a running-average line, with
+            // a hard cap of 25% of total race laps. Restricted to RACING/
+            // RACE_REPLAY.
             if (cl && isRacingLike(newStatus)) {
                 // currentLap is in "47/100" form; capture both halves.
                 const parts = cl.split('/');
@@ -2533,41 +2554,44 @@
                 const totalNow = parseInt(parts[1], 10);
                 if (totalNow > 0) state.totalLaps = totalNow;
                 if (lapNumNow > 0 && lapNumNow > state.prevLapNumber) {
-                    // A new lap has just started — the previous lap's time
-                    // should be in state.lastLap. Capture it into the history
-                    // BEFORE deciding whether to fire commentary, so the {delta}
-                    // and {avgTime} tokens see the freshly-completed lap.
+                    // A new lap has just started — capture the previous lap's
+                    // time into the history BEFORE deciding commentary, so
+                    // {delta} and {avgTime} reflect the freshly-completed lap.
                     if (state.prevLapNumber >= 1
                         && state.lastLap && state.lastLap !== '—') {
                         const sec = parseLapTimeToSeconds(state.lastLap);
                         if (sec > 0) {
                             state.lapTimesSec.push(sec);
-                            // Cap history to last 200 entries — defensive
-                            // against unbounded growth on edge-case races.
                             if (state.lapTimesSec.length > 200) {
                                 state.lapTimesSec = state.lapTimesSec.slice(-200);
                             }
                         }
                     }
 
-                    // Decide whether THIS lap transition fires commentary.
-                    // First-ever transition (prevLapNumber 0→1) is the start
-                    // of lap 1, no time to report yet. Skip.
+                    // Fire commentary from lap 2 onwards.
                     if (state.prevLapNumber >= 1 && !commentaryPaused) {
-                        // Roll the initial cadence on the first eligible
-                        // transition (when nextLapMsgAt is still 0).
+                        // Initialise the cadence target on the first eligible
+                        // transition (when nextLapMsgAt is still 0). That's
+                        // when the FIRST comparison line will fire.
                         if (state.nextLapMsgAt === 0) {
                             state.nextLapMsgAt = lapNumNow + rollLapMessageGap(state.totalLaps);
                         }
-                        const shouldFire = (lapNumNow >= state.nextLapMsgAt);
-                        if (shouldFire) {
-                            try {
+                        const comparisonEligible = (lapNumNow >= state.nextLapMsgAt);
+
+                        try {
+                            let poolKey, typeKey;
+                            if (!comparisonEligible) {
+                                // DEFAULT: every-lap basic line.
+                                poolKey = 'lapTimeBasic';
+                                typeKey = 'lapTimeBasic';
+                            } else {
+                                // CADENCED upgrade — comparison or average.
                                 const arr = state.lapTimesSec;
-                                let poolKey, typeKey;
                                 if (arr.length < 2) {
-                                    // Can't compare — fall back to neutral "same" pool.
-                                    poolKey = 'lapTimeSame';
-                                    typeKey = 'lapTimeSame';
+                                    // Can't compare yet — fall back to basic
+                                    // rather than skip the line entirely.
+                                    poolKey = 'lapTimeBasic';
+                                    typeKey = 'lapTimeBasic';
                                 } else {
                                     const diff = arr[arr.length - 1] - arr[arr.length - 2];
                                     if (Math.abs(diff) < 0.5) {
@@ -2578,29 +2602,27 @@
                                         poolKey = 'lapTimeSlower'; typeKey = 'lapTimeSlower';
                                     }
                                 }
-                                // Decide if THIS one should be an average line
-                                // instead. Per spec, average lines are
-                                // "occasional, no more than 25% of total laps".
-                                // We use a 1-in-4 chance gated by that cap, and
-                                // require at least 3 lap times on record so the
-                                // average isn't a one-or-two-lap fluke.
+                                // Optional further upgrade to running-average.
+                                // Capped per spec at 25% of total laps; 1-in-4
+                                // chance among eligible laps; needs >=3 lap
+                                // records so the average isn't trivial.
                                 const maxAvgMsgs = Math.max(1, Math.floor(state.totalLaps * 0.25));
-                                if (arr.length >= 3
+                                if (state.lapTimesSec.length >= 3
                                     && state.averageLapMsgCount < maxAvgMsgs
                                     && Math.random() < 0.25) {
                                     poolKey = 'lapTimeAverage';
                                     typeKey = 'lapTimeAverage';
                                     state.averageLapMsgCount++;
                                 }
-                                const pool = LINES.RACING[poolKey];
-                                if (pool && pool.length) {
-                                    const picked = pickLine(pool, typeKey);
-                                    pushLine(fill(picked), 'lapTime', ICON.stopwatch);
-                                }
-                                // Roll the next firing point.
+                                // Roll the next cadence point AFTER this lap.
                                 state.nextLapMsgAt = lapNumNow + rollLapMessageGap(state.totalLaps);
-                            } catch (e) { console.error('[TC RC] lap-time:', e); }
-                        }
+                            }
+                            const pool = LINES.RACING[poolKey];
+                            if (pool && pool.length) {
+                                const picked = pickLine(pool, typeKey);
+                                pushLine(fill(picked), 'lapTime', ICON.stopwatch);
+                            }
+                        } catch (e) { console.error('[TC RC] lap-time:', e); }
                     }
                     state.prevLapNumber = lapNumNow;
                 }
