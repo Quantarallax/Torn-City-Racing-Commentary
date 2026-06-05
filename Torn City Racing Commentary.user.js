@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.68.0
+// @version      2.69.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.68.0';
+    const SCRIPT_VERSION = '2.69.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v77';
+    const STORAGE_KEY = 'tc_racecomm_v78';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -559,8 +559,15 @@
         preLaunchMsgCount: 0
     };
 
-    // commentaryPaused — session only, never persisted
+    // commentaryPaused — session only, never persisted. Manual via the Pause button.
     let commentaryPaused = false;
+
+    // replayPausedAuto — session only. Set true when a RACE_REPLAY is paused
+    // by Torn itself (page text "Race paused") and cleared when "Race
+    // replaying" appears. Independent of commentaryPaused so a manual pause
+    // toggle isn't disturbed by auto-pause state, and vice versa. The pause
+    // filter (see pushLine) treats either flag as "paused".
+    let replayPausedAuto = false;
 
     // Timers — session only, never persisted
     let tAmbient = 0;
@@ -1351,7 +1358,7 @@
 
     function pushLine (text, type, icon, isHtml) {
         const alwaysShow = (type === 'status' || type === 'finish' || type === 'outro' || type === 'crash');
-        if (commentaryPaused && !alwaysShow) return;
+        if ((commentaryPaused || replayPausedAuto) && !alwaysShow) return;
         feedLines.push({ text: text, type: type, icon: icon || '', isHtml: !!isHtml });
         if (feedLines.length > MAX_FEED) feedLines.shift();
         appendToFeed(text, type, icon || '', isHtml);
@@ -2644,7 +2651,7 @@
                     }
 
                     // Fire commentary from lap 2 onwards.
-                    if (state.prevLapNumber >= 1 && !commentaryPaused) {
+                    if (state.prevLapNumber >= 1 && !commentaryPaused && !replayPausedAuto) {
                         // Initialise the comparison cadence target on the first
                         // eligible transition (when nextLapMsgAt is still 0).
                         if (state.nextLapMsgAt === 0) {
@@ -2737,6 +2744,39 @@
             state.currentLap = '—';
             state.completion = '—';
         }
+
+        // Replay pause/resume detection (per spec v2.69). During RACE_REPLAY,
+        // Torn can pause the replay — page text shows "Race paused". When
+        // detected we auto-pause commentary and surface a "Replay Paused"
+        // line. When "Race replaying" appears the auto-pause clears with a
+        // "Replay Resumed" line. The replayPausedAuto flag is kept separate
+        // from the manual commentaryPaused so neither one disturbs the other.
+        // Outside RACE_REPLAY, any lingering auto-pause is cleared silently
+        // (e.g. user navigates away from the replay page).
+        try {
+            if (newStatus === S.RACE_REPLAY) {
+                const text = getPageText();
+                // Order matters slightly: check "Race paused" first since
+                // "Race replaying" is the more verbose phrase and an unlikely
+                // accidental substring match for "paused".
+                const isPaused = /\brace\s+paused\b/i.test(text);
+                const isReplaying = /\brace\s+replaying\b/i.test(text);
+                if (isPaused && !replayPausedAuto) {
+                    replayPausedAuto = true;
+                    // "Replay Paused" line bypasses the pause filter because
+                    // pushLine treats type 'status' as always-show.
+                    pushLine('Replay Paused', 'status');
+                } else if (isReplaying && replayPausedAuto) {
+                    replayPausedAuto = false;
+                    pushLine('Replay Resumed', 'status');
+                }
+            } else if (replayPausedAuto) {
+                // Left RACE_REPLAY status — clear silently. The user has
+                // navigated away or the replay ended; no point firing a
+                // resume message in a different context.
+                replayPausedAuto = false;
+            }
+        } catch (e) { console.error('[TC RC] replay pause detect:', e); }
 
         if (newStatus !== currentStatus) {
             // Update state.status BEFORE firing the transition handler so that
