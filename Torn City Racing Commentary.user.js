@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.66.0
+// @version      2.68.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.66.0';
+    const SCRIPT_VERSION = '2.68.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v75';
+    const STORAGE_KEY = 'tc_racecomm_v77';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -303,23 +303,32 @@
                 'A swarm of cars. Survival as much as speed.',
                 'Total mayhem. Every gap closes the moment it opens.'
             ],
-            // Lap-time commentary pools (per spec v2.66). DEFAULTS to firing
-            // every lap from lap 2 onwards. On every lap the script picks
-            // *some* lap-time line:
+            // Lap-time commentary pools (per spec v2.67). DEFAULTS to firing
+            // every lap from lap 2 onwards. On each lap the script picks one
+            // pool by priority: average > comparison > basic.
             //   - lapTimeBasic (default):  "{player} completes lap N in TT".
             //     Used for the majority of laps — the every-lap baseline.
             //   - lapTimeFaster/Slower/Same (comparison): used at cadenced
-            //     intervals, layered ON TOP of the default — replacing the
-            //     basic line at those eligible laps.
-            //       50-100 laps → every 8-12 laps (random)
-            //       2-49 laps   → every 2-6 laps (random)
-            //   - lapTimeAverage: occasional, capped at 25% of total laps.
-            //     Only fires on eligible comparison laps (replaces comparison).
+            //     intervals (50-100 laps → every 8-12, 2-49 laps → every 2-6).
+            //   - lapTimeAverage / lapTimeAverageFirst: every 2-4 laps from
+            //     lap 5 onwards. The first message uses lapTimeAverageFirst
+            //     (no previous average to compare against); subsequent ones
+            //     use lapTimeAverage and reference the change vs the
+            //     previously-reported average ("3s down on the last reading").
+            //     Has higher priority than comparison — if both cadences hit
+            //     the same lap, the average line wins.
             // Tokens used:
-            //   {lapTime} = just-completed lap time (e.g. "00:27")
-            //   {lapNum}  = its lap number
-            //   {delta}   = abs seconds difference vs the previous lap
-            //   {avgTime} = running average so far (formatted as MM:SS)
+            //   {lapTime}        = just-completed lap time (e.g. "00:27")
+            //   {lapNum}         = its lap number
+            //   {delta}          = abs seconds diff vs the previous lap
+            //   {avgTime}        = running average so far (MM:SS)
+            //   {avgComparison}  = pre-formatted phrase for the change vs the
+            //                      previous reported average, e.g.
+            //                      "-2 faster on last average" or
+            //                      "+3 slower than last average". Empty when
+            //                      no prior reading or when level — the
+            //                      "level" case uses dedicated templates
+            //                      from lapTimeAverageLevel instead.
             lapTimeBasic: [
                 '{player} completes lap {lapNum} in {lapTime}.',
                 'A {lapTime} for {player} on lap {lapNum}. Steady work.',
@@ -363,12 +372,38 @@
                 "Consistency on display — {player} round in {lapTime} for lap {lapNum}."
             ],
             lapTimeAverage: [
-                "Running average for {player} now sits at {avgTime} per lap.",
-                "{player}'s race-average lap creeps in at {avgTime} so far.",
-                "Across the laps, {player} is averaging {avgTime}. Solid stuff.",
-                "Average pace for {player}: {avgTime} a lap on this run.",
-                "{player} settling into a {avgTime} rhythm across the race so far.",
-                "Lap average ticking along at {avgTime} for {player}."
+                // Compared to the previous reported average. {avgComparison}
+                // expands to a pre-formatted phrase like "-2 faster on last
+                // average" or "+3 slower than last average". Per spec v2.68
+                // these are NOT used when the new average is level — see the
+                // dedicated lapTimeAverageLevel pool below.
+                "Running average {avgTime} for {player}. {avgComparison}.",
+                "{player}'s race average now {avgTime}. {avgComparison}.",
+                "Average lap for {player} ticks to {avgTime}. {avgComparison}.",
+                "{avgTime} the new race average for {player}. {avgComparison}.",
+                "Updated average for {player}: {avgTime}. {avgComparison}.",
+                "{player} now averaging {avgTime} a lap. {avgComparison}.",
+                "Race-average for {player} reads {avgTime}. {avgComparison}.",
+                "{player}'s pace average shifts to {avgTime}. {avgComparison}."
+            ],
+            // Level case — the running average is unchanged (within 0.5s) of
+            // the previous reading. Per spec v2.68 the wording is dedicated:
+            // "Running average MM:SS for {player}. Level with previous update."
+            lapTimeAverageLevel: [
+                "Running average {avgTime} for {player}. Level with previous update.",
+                "{player}'s race average holds at {avgTime}. Level with the previous update.",
+                "Average lap for {player} unchanged at {avgTime}. Level with the previous update.",
+                "{avgTime} again the race average for {player}. Level with previous update."
+            ],
+            // First-ever average message in the race (no previous to compare
+            // against). Plain statement of the running average.
+            lapTimeAverageFirst: [
+                "{player}'s race average so far comes in at {avgTime} per lap.",
+                "Running average for {player} sits at {avgTime} so far.",
+                "Across the laps so far, {player} averaging {avgTime}.",
+                "First read on {player}'s race average: {avgTime} a lap.",
+                "{player} settling into a {avgTime} rhythm on average across the race.",
+                "Average lap for {player} reads {avgTime} so far this race."
             ],
             player: [
                 '{player} sits in {pos}, keeping it clean and consistent.',
@@ -497,9 +532,15 @@
         // new race entry (which means: roll a fresh target on the first lap
         // transition).
         nextLapMsgAt: 0,
-        // Count of average-lap-time lines fired this race. Spec limits these
-        // to "no more than 25% of the full number of laps".
-        averageLapMsgCount: 0,
+        // Per spec v2.67: average lap-time messages have their own cadence —
+        // every 2-4 laps starting from lap 5. nextAvgLapAt is the next lap at
+        // which an average message will fire (0 = not yet scheduled).
+        nextAvgLapAt: 0,
+        // Previous average lap time (in seconds) — used to compute the
+        // running-vs-previous comparison shown in average commentary. 0 means
+        // "no previous average recorded yet"; first average message just
+        // states the current value.
+        lastAvgSec: 0,
         completion: '—',
         // Fix Button removed in v2.62 — windowFixed is no longer used but
         // remains as a placeholder to keep persisted-state compatibility with
@@ -898,7 +939,8 @@
             state.lapTimesSec = Array.isArray(p.lapTimesSec) ? p.lapTimesSec.slice(-200) : [];
             state.totalLaps = p.totalLaps || 0;
             state.nextLapMsgAt = p.nextLapMsgAt || 0;
-            state.averageLapMsgCount = p.averageLapMsgCount || 0;
+            state.nextAvgLapAt = p.nextAvgLapAt || 0;
+            state.lastAvgSec = p.lastAvgSec || 0;
             state.completion = p.completion || '—';
             state.windowFixed = p.windowFixed || false;
             state.windowLeft = p.windowLeft || '';
@@ -963,7 +1005,8 @@
                 lapTimesSec: state.lapTimesSec,
                 totalLaps: state.totalLaps,
                 nextLapMsgAt: state.nextLapMsgAt,
-                averageLapMsgCount: state.averageLapMsgCount,
+                nextAvgLapAt: state.nextAvgLapAt,
+                lastAvgSec: state.lastAvgSec,
                 completion: state.completion,
                 windowFixed: state.windowFixed,
                 windowLeft: state.windowLeft,
@@ -1055,6 +1098,13 @@
         return minGap + Math.floor(Math.random() * (maxGap - minGap + 1));
     }
 
+    // Per spec v2.67: average lap-time commentary fires every 2-4 laps,
+    // starting from lap 5. Returns the gap (2-4 inclusive) to add to the
+    // current lap number for the next eligible average message.
+    function rollAverageLapGap () {
+        return 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
+    }
+
     function ambientPoolFor (statusLines) {
         if (!statusLines || !Array.isArray(statusLines.ambient)) return [];
         let out = statusLines.ambient;
@@ -1133,6 +1183,30 @@
                 let total = 0;
                 for (let i = 0; i < arr.length; i++) total += arr[i];
                 return formatSecondsAsLapTime(total / arr.length);
+            })(),
+            // {avgComparison} — pre-formatted phrase comparing the current
+            // running average to the previously-reported one. Per spec v2.68:
+            //   faster: "-2 faster on last average"
+            //   slower: "+3 slower than last average"
+            // (no trailing full stop — the template adds it). Empty string
+            // when there's no prior reading or when the diff is too small
+            // (caller should pick a "level with" template instead).
+            avgComparison: (function () {
+                const arr = state.lapTimesSec;
+                if (!arr.length || !state.lastAvgSec) return '';
+                let total = 0;
+                for (let i = 0; i < arr.length; i++) total += arr[i];
+                const cur = total / arr.length;
+                const diff = cur - state.lastAvgSec;
+                if (Math.abs(diff) < 0.5) return '';
+                // Round to nearest integer for the headline number.
+                const absRound = Math.round(Math.abs(diff));
+                if (diff < 0) {
+                    // Got faster — sign is minus.
+                    return '-' + absRound + ' faster on last average';
+                }
+                // Got slower — sign is plus.
+                return '+' + absRound + ' slower than last average';
             })()
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
@@ -1670,7 +1744,8 @@
                 state.lapTimesSec = [];
                 state.totalLaps = 0;
                 state.nextLapMsgAt = 0;
-                state.averageLapMsgCount = 0;
+                state.nextAvgLapAt = 0;
+                state.lastAvgSec = 0;
 
                 // Repopulate knownRacerNames with the racers that were already on the
                 // track when the player joined. This means only genuinely NEW arrivals
@@ -2570,26 +2645,64 @@
 
                     // Fire commentary from lap 2 onwards.
                     if (state.prevLapNumber >= 1 && !commentaryPaused) {
-                        // Initialise the cadence target on the first eligible
-                        // transition (when nextLapMsgAt is still 0). That's
-                        // when the FIRST comparison line will fire.
+                        // Initialise the comparison cadence target on the first
+                        // eligible transition (when nextLapMsgAt is still 0).
                         if (state.nextLapMsgAt === 0) {
                             state.nextLapMsgAt = lapNumNow + rollLapMessageGap(state.totalLaps);
                         }
+                        // Per spec v2.67: average cadence starts from lap 5,
+                        // every 2-4 laps. Initialise nextAvgLapAt the moment
+                        // we reach lap 5 — first average fires AT lap 5.
+                        if (state.nextAvgLapAt === 0 && lapNumNow >= 5) {
+                            state.nextAvgLapAt = lapNumNow;
+                        }
                         const comparisonEligible = (lapNumNow >= state.nextLapMsgAt);
+                        const averageEligible = (state.nextAvgLapAt > 0
+                            && lapNumNow >= state.nextAvgLapAt
+                            && state.lapTimesSec.length >= 3);
 
                         try {
                             let poolKey, typeKey;
-                            if (!comparisonEligible) {
-                                // DEFAULT: every-lap basic line.
-                                poolKey = 'lapTimeBasic';
-                                typeKey = 'lapTimeBasic';
-                            } else {
-                                // CADENCED upgrade — comparison or average.
+
+                            // PRIORITY: average > comparison > basic. The
+                            // average line is the most informative on its lap;
+                            // showing both an avg and a comparison on the same
+                            // lap would just be redundant noise.
+                            if (averageEligible) {
+                                // First-ever average vs subsequent (compared)
+                                // average. lastAvgSec === 0 means no prior
+                                // reading; we'll record one after firing.
+                                if (state.lastAvgSec === 0) {
+                                    poolKey = 'lapTimeAverageFirst';
+                                    typeKey = 'lapTimeAverageFirst';
+                                } else {
+                                    // Compute current average to decide which
+                                    // pool — Level (within 0.5s) or compared.
+                                    const arrSel = state.lapTimesSec;
+                                    let totalSel = 0;
+                                    for (let i = 0; i < arrSel.length; i++) totalSel += arrSel[i];
+                                    const curAvg = totalSel / arrSel.length;
+                                    if (Math.abs(curAvg - state.lastAvgSec) < 0.5) {
+                                        // Per spec v2.68: dedicated wording
+                                        // for the "level" case.
+                                        poolKey = 'lapTimeAverageLevel';
+                                        typeKey = 'lapTimeAverageLevel';
+                                    } else {
+                                        poolKey = 'lapTimeAverage';
+                                        typeKey = 'lapTimeAverage';
+                                    }
+                                }
+                                // After this fire, record the current average
+                                // as lastAvgSec so the NEXT average message
+                                // can compare against it, and re-roll cadence.
+                                const arr = state.lapTimesSec;
+                                let total = 0;
+                                for (let i = 0; i < arr.length; i++) total += arr[i];
+                                state.lastAvgSec = total / arr.length;
+                                state.nextAvgLapAt = lapNumNow + rollAverageLapGap();
+                            } else if (comparisonEligible) {
                                 const arr = state.lapTimesSec;
                                 if (arr.length < 2) {
-                                    // Can't compare yet — fall back to basic
-                                    // rather than skip the line entirely.
                                     poolKey = 'lapTimeBasic';
                                     typeKey = 'lapTimeBasic';
                                 } else {
@@ -2602,21 +2715,13 @@
                                         poolKey = 'lapTimeSlower'; typeKey = 'lapTimeSlower';
                                     }
                                 }
-                                // Optional further upgrade to running-average.
-                                // Capped per spec at 25% of total laps; 1-in-4
-                                // chance among eligible laps; needs >=3 lap
-                                // records so the average isn't trivial.
-                                const maxAvgMsgs = Math.max(1, Math.floor(state.totalLaps * 0.25));
-                                if (state.lapTimesSec.length >= 3
-                                    && state.averageLapMsgCount < maxAvgMsgs
-                                    && Math.random() < 0.25) {
-                                    poolKey = 'lapTimeAverage';
-                                    typeKey = 'lapTimeAverage';
-                                    state.averageLapMsgCount++;
-                                }
-                                // Roll the next cadence point AFTER this lap.
                                 state.nextLapMsgAt = lapNumNow + rollLapMessageGap(state.totalLaps);
+                            } else {
+                                // DEFAULT: every-lap basic line.
+                                poolKey = 'lapTimeBasic';
+                                typeKey = 'lapTimeBasic';
                             }
+
                             const pool = LINES.RACING[poolKey];
                             if (pool && pool.length) {
                                 const picked = pickLine(pool, typeKey);
