@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.70.0
+// @version      2.71.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.70.0';
+    const SCRIPT_VERSION = '2.71.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v79';
+    const STORAGE_KEY = 'tc_racecomm_v80';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -117,7 +117,7 @@
         MENU: 'MENU', COUNTDOWN: 'COUNTDOWN', PRE_LAUNCH: 'PRE_LAUNCH',
         WAITING: 'WAITING', RACING: 'RACING', RACE_REPLAY: 'RACE_REPLAY',
         ENDED: 'ENDED', CRASHED: 'CRASHED',
-        UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', TIMED_OUT: 'TIMED_OUT',
+        UNAVAILABLE: 'UNAVAILABLE', HOSPITAL: 'HOSPITAL', JAIL: 'JAIL', TIMED_OUT: 'TIMED_OUT',
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
         NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED',
         TORN_DOWN: 'TORN_DOWN', IN_GARAGE: 'IN_GARAGE',
@@ -128,7 +128,7 @@
     // The user will see the announcement once, then nothing more until the page
     // returns to MENU (or some other active status).
     const QUIET_STATUSES = [
-        'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'TIMED_OUT',
+        'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'JAIL', 'TIMED_OUT',
         'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED',
         'TORN_DOWN', 'IN_GARAGE', 'STATISTICS', 'ENLISTED'
     ];
@@ -1290,7 +1290,7 @@
     // fixed, short sequence of messages that read as a list — they should not
     // be reversed when the user has set scrollDirection to 'up'.
     const FORCE_TOP_DOWN_STATUSES = [
-        'HOSPITAL', 'TIMED_OUT', 'ALREADY_STARTED', 'NOT_ALLOWED',
+        'HOSPITAL', 'JAIL', 'TIMED_OUT', 'ALREADY_STARTED', 'NOT_ALLOWED',
         'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'TORN_DOWN', 'UNAVAILABLE',
         'IN_GARAGE', 'STATISTICS', 'ENLISTED'
     ];
@@ -1848,6 +1848,13 @@
             const html = 'You are in <a class="tc-link" href="https://www.torn.com/hospitalview.php" target="_blank" rel="noopener">hospital</a>, you better stay and rest.';
             pushLine(html, 'status', '', true);
         }
+        if (newSt === S.JAIL && oldSt !== S.JAIL) {
+            clearFeed();
+            // Jail: single line, then no further commentary until the page
+            // returns to a normal status. Per spec v2.71 — plain text, no
+            // hyperlink (unlike HOSPITAL).
+            pushLine('You are in jail, no racing at the moment for you.', 'status', '', true);
+        }
         if (newSt === S.TIMED_OUT && oldSt !== S.TIMED_OUT) {
             clearFeed();
             pushLine('The racers have all gone home.', 'status');
@@ -2392,6 +2399,14 @@
         if (/while\s+in\s+hospital/i.test(text)) {
             return S.HOSPITAL;
         }
+        // Jail: the player is in jail (per spec v2.71). The page shows
+        // "This page is not available while in jail". Same shape as the
+        // hospital lockout — single line, no further commentary until the
+        // page returns to a normal status. Match the stable substring
+        // "while in jail" which is unique enough to not false-positive.
+        if (/while\s+in\s+jail/i.test(text)) {
+            return S.JAIL;
+        }
         // Race timed out: a previous race attempt failed to start
         if (/your\s+last\s+race\s+timed\s+out\s+at/i.test(text)) {
             return S.TIMED_OUT;
@@ -2623,7 +2638,7 @@
         }
 
         // Blank stats in all menu/error/quiet statuses
-        const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.TIMED_OUT,
+        const blankStatsStatuses = [S.MENU, S.UNAVAILABLE, S.HOSPITAL, S.JAIL, S.TIMED_OUT,
             S.ALREADY_STARTED, S.RACE_FULL, S.NOT_ENOUGH_FUNDS, S.NOT_ALLOWED,
             S.TORN_DOWN, S.IN_GARAGE, S.STATISTICS, S.ENLISTED];
         if (blankStatsStatuses.indexOf(newStatus) === -1) {
@@ -2858,6 +2873,7 @@
             [S.CRASHED]: { label: 'CRASHED', cls: 'st-crashed' },
             [S.UNAVAILABLE]: { label: 'UNAVAILABLE', cls: 'st-unavailable' },
             [S.HOSPITAL]: { label: 'HOSPITAL', cls: 'st-hospital' },
+            [S.JAIL]: { label: 'JAIL', cls: 'st-jail' },
             [S.TIMED_OUT]: { label: 'TIMED OUT', cls: 'st-timedout' },
             [S.ALREADY_STARTED]: { label: 'TOO LATE', cls: 'st-toolate' },
             [S.RACE_FULL]: { label: 'RACE FULL', cls: 'st-racefull' },
@@ -2879,6 +2895,7 @@
         if (state.status === S.MENU) { el.innerHTML = '<div class="tc-lb-empty">Select a race\u2026</div>'; return; }
         if (state.status === S.UNAVAILABLE) { el.innerHTML = '<div class="tc-lb-empty">Travelling\u2026</div>'; return; }
         if (state.status === S.HOSPITAL) { el.innerHTML = '<div class="tc-lb-empty">In hospital.</div>'; return; }
+        if (state.status === S.JAIL) { el.innerHTML = '<div class="tc-lb-empty">In jail.</div>'; return; }
         if (state.status === S.TIMED_OUT) { el.innerHTML = '<div class="tc-lb-empty">Race timed out.</div>'; return; }
         if (state.status === S.ALREADY_STARTED) { el.innerHTML = '<div class="tc-lb-empty">Race already started.</div>'; return; }
         if (state.status === S.RACE_FULL) { el.innerHTML = '<div class="tc-lb-empty">Race full.</div>'; return; }
@@ -2997,7 +3014,7 @@
 #tc-rc-status-row{display:flex;align-items:center;gap:10px;padding:7px 12px 6px;background:var(--c-bg2);border-bottom:1px solid var(--c-border2);flex-shrink:0;}
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
-.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-replay{color:var(--c-purple);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
+.st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-replay{color:var(--c-purple);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-jail{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
