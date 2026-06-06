@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.72.0
+// @version      2.73.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.72.0';
+    const SCRIPT_VERSION = '2.73.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v81';
+    const STORAGE_KEY = 'tc_racecomm_v82';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -578,20 +578,27 @@
     let tWaiting = 0;
     let tPosCooldown = 0;
 
-    // Big-race throttle (per spec v2.63): when racerCount > BIG_RACE_THRESHOLD,
-    // non-ambient commentary messages are throttled to at most one every 3-5
-    // seconds (jittered randomly within that window) so the feed doesn't
-    // flood. AMBIENT messages always pass through this gate — they have their
-    // own pacing via tAmbient. Session-only; nothing persisted.
-    const BIG_RACE_THRESHOLD = 20;
-    // Minimum/maximum gap between non-ambient lines in a big race. Each time
-    // a line passes the gate, the next gap is rolled randomly in [MIN, MAX].
-    const BIG_RACE_MIN_GAP_MS = 3000;
-    const BIG_RACE_MAX_GAP_MS = 5000;
-    // Timestamp of the last non-ambient line shown under the throttle. The
-    // next line is admitted only after the rolled gap has elapsed.
-    let bigRaceLastShownAt = 0;
-    let bigRaceNextAllowedAt = 0;
+    // Throttle slider (per spec v2.73): a 0-100 slider next to the Pause
+    // button controls how dense the commentary is during RACING/RACE_REPLAY.
+    //   0   = "Less" — only player-related messages get through (everything
+    //         else is suppressed). Ambient messages still pass.
+    //   100 = "All"  — every line passes (no throttling).
+    //   In between, non-player non-ambient lines are gated by a time-based
+    //   probability: higher slider value → shorter gap between messages.
+    // Persisted to GM storage so the user's preference survives reload.
+    // Throttle is INDEPENDENT of racer count (per spec — explicitly do NOT
+    // throttle based on number of racers). The old big-race throttle from
+    // v2.63 has been removed in favour of this user-controlled mechanism.
+    const THROTTLE_STORAGE_KEY = 'tc_racecomm_throttle';
+    // 100 = no throttling, full commentary. Default behaviour matches the
+    // pre-v2.73 unthrottled experience so existing users don't see a sudden
+    // drop in commentary density.
+    let throttleValue = 100;
+    // Timestamp of the last non-player non-ambient line that passed the
+    // throttle, plus the next time another such line may pass. Mid-slider
+    // values roll a gap each time a line passes; the gap shrinks toward
+    // zero as the slider approaches 100.
+    let throttleNextAllowedAt = 0;
 
     let recentByType = {
         ambient: [], player: [], position: [],
@@ -650,6 +657,21 @@
             tracksCache = null;
             try { GM_setValue(TRACKS_CACHE_STORAGE, ''); } catch (_) {}
         } catch (_) {}
+    }
+
+    // Throttle slider persistence (per spec v2.73). The slider value is a
+    // user preference, so it must survive page reloads and script restarts.
+    function loadThrottleValue () {
+        try {
+            const raw = GM_getValue(THROTTLE_STORAGE_KEY, null);
+            if (raw === null || raw === undefined) return;
+            const n = parseInt(raw, 10);
+            if (isNaN(n)) return;
+            throttleValue = Math.max(0, Math.min(100, n));
+        } catch (_) {}
+    }
+    function saveThrottleValue () {
+        try { GM_setValue(THROTTLE_STORAGE_KEY, String(throttleValue)); } catch (_) {}
     }
 
     // Load cached tracks payload from storage. Returns the payload if still
@@ -1424,21 +1446,45 @@
     }
 
     // ─── Commentary ───────────────────────────────────────────────────────────────
-    // Big-grid throttling (per spec v2.63): in RACING with more than 20 drivers,
-    // non-ambient messages (position calls, player-specific, proximity,
-    // movement) are admitted at most once every 3-5 seconds (random jitter).
-    // Ambient and funny lines bypass this — they're the atmospheric colour
-    // and set the pace. Returns true if the line should be shown.
-    function bigRaceShouldShow () {
+    // Throttle slider gate (per spec v2.73): controls how many non-player
+    // non-ambient lines pass through during RACING/RACE_REPLAY. Replaces the
+    // old big-race throttle which gated by racer count.
+    // Behaviour by slider value (0-100):
+    //   100  → admit everything (no gap, no suppression)
+    //   1-99 → admit at most one line per gap that scales inversely with the
+    //          slider. At 50 the gap is ~3s; at 10 the gap is ~9s.
+    //   0    → reject all non-player non-ambient lines entirely
+    // The `isPlayerRelated` flag lets callers bypass the gate for any line
+    // involving the focused player (per spec: "Less means only player related
+    // messages"). Ambient lines also pass — callers omit the gate for those.
+    function throttleShouldShow (isPlayerRelated) {
+        // Outside racing-like statuses, no throttling — full commentary.
         if (!isRacingLike(state.status)) return true;
-        if ((state.racerCount || 0) <= BIG_RACE_THRESHOLD) return true;
+        // Player-related lines always pass.
+        if (isPlayerRelated) return true;
+        // Slider at 100 — no throttling at all.
+        if (throttleValue >= 100) return true;
+        // Slider at 0 — suppress all non-player non-ambient lines outright.
+        if (throttleValue <= 0) return false;
+        // Time-based gate. Gap scales inversely with slider value so a higher
+        // slider lets more lines through. At slider=99 gap ≈ 100ms (effectively
+        // no throttle); at slider=10 gap ≈ 9000ms.
         const now = Date.now();
-        if (now < bigRaceNextAllowedAt) return false;
-        // Admit this one — roll the next gap in [3s, 5s].
-        bigRaceLastShownAt = now;
-        const jitter = BIG_RACE_MIN_GAP_MS + Math.random() * (BIG_RACE_MAX_GAP_MS - BIG_RACE_MIN_GAP_MS);
-        bigRaceNextAllowedAt = now + jitter;
+        if (now < throttleNextAllowedAt) return false;
+        // Linear interpolation: gap_ms = (100 - slider) * 100. Tuned so the
+        // mid-slider feels like the old 3-5s big-race throttle (slider≈65-70).
+        const gapMs = (100 - throttleValue) * 100;
+        throttleNextAllowedAt = now + gapMs;
         return true;
+    }
+
+    // Legacy alias — earlier code paths still call bigRaceShouldShow() in a
+    // few places. Route them through the new throttle so the old name keeps
+    // working without a wide rename across the file. Callers that don't pass
+    // an explicit isPlayerRelated argument default to false (treat as
+    // non-player), preserving the existing call-site semantics.
+    function bigRaceShouldShow (isPlayerRelated) {
+        return throttleShouldShow(!!isPlayerRelated);
     }
 
     function fireCommentary (st) {
@@ -1490,7 +1536,7 @@
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
             }
             if (now >= tPlayer) {
-                if (bigRaceShouldShow()) {
+                if (bigRaceShouldShow(true)) {
                     pushLine(fill(pickLine(LINES.RACING.player, 'player')), 'player');
                 }
                 tPlayer = now + PLAYER_GAP + Math.random() * 8000;
@@ -1740,9 +1786,8 @@
                 knownFinishers.clear();
                 knownRacerNames.clear();
                 otherCrashedNames.clear();
-                // Reset big-race throttle state for the new race.
-                bigRaceLastShownAt = 0;
-                bigRaceNextAllowedAt = 0;
+                // Reset throttle gate timestamp for the new race.
+                throttleNextAllowedAt = 0;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -2698,6 +2743,14 @@
 
                         try {
                             let poolKey, typeKey;
+                            // Bug fix v2.73: track the new average to assign
+                            // AFTER pushLine() runs. If we set state.lastAvgSec
+                            // before pushLine, fill() computes avgComparison
+                            // by diffing current avg against the just-overwritten
+                            // value (diff = 0), returns empty string, and the
+                            // template renders ". ." at the end — the reported
+                            // double-stop bug. Deferring keeps fill() correct.
+                            let pendingLastAvgSec = null;
 
                             // PRIORITY: average > comparison > basic. The
                             // average line is the most informative on its lap;
@@ -2727,14 +2780,27 @@
                                         typeKey = 'lapTimeAverage';
                                     }
                                 }
-                                // After this fire, record the current average
-                                // as lastAvgSec so the NEXT average message
-                                // can compare against it, and re-roll cadence.
+                                // Bug fix v2.73: compute the new lastAvgSec
+                                // value here but DO NOT assign it yet. fill()
+                                // computes the {avgComparison} token by
+                                // diffing current avg against state.lastAvgSec
+                                // — if we overwrite lastAvgSec first, that
+                                // diff would always be zero and avgComparison
+                                // would return '', leaving the rendered line
+                                // ending in ". ." (the reported double-stop
+                                // bug). Assigning AFTER pushLine() ensures
+                                // fill() sees the previous reading.
                                 const arr = state.lapTimesSec;
                                 let total = 0;
                                 for (let i = 0; i < arr.length; i++) total += arr[i];
-                                state.lastAvgSec = total / arr.length;
+                                const newAvgSec = total / arr.length;
                                 state.nextAvgLapAt = lapNumNow + rollAverageLapGap();
+                                // Stash newAvgSec for the post-push assignment.
+                                // Using a local rather than mutating
+                                // state.lastAvgSec now keeps fill() seeing
+                                // the prior value (essential for the
+                                // {avgComparison} token to render correctly).
+                                pendingLastAvgSec = newAvgSec;
                             } else if (comparisonEligible) {
                                 const arr = state.lapTimesSec;
                                 if (arr.length < 2) {
@@ -2761,6 +2827,12 @@
                             if (pool && pool.length) {
                                 const picked = pickLine(pool, typeKey);
                                 pushLine(fill(picked), 'lapTime', ICON.stopwatch);
+                            }
+                            // Now safe to commit the deferred average update —
+                            // fill() has already rendered using the previous
+                            // value (see Bug fix v2.73 note above).
+                            if (pendingLastAvgSec !== null) {
+                                state.lastAvgSec = pendingLastAvgSec;
                             }
                         } catch (e) { console.error('[TC RC] lap-time:', e); }
                     }
@@ -3065,6 +3137,11 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 .tc-foot-btn{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;background:rgba(255,255,255,.04);border:1px solid var(--c-border);color:var(--c-dim);padding:2px 9px;border-radius:3px;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;transition:background .15s,color .15s,border-color .15s;white-space:nowrap;}
 .tc-foot-btn:hover{background:rgba(245,192,48,.12);border-color:var(--c-gold);color:var(--c-gold);}
 .tc-foot-btn.tc-btn-active{background:rgba(245,192,48,.15);border-color:var(--c-gold);color:var(--c-gold);}
+/* Throttle slider (per spec v2.73). Compact slider that sits next to the
+ * Pause button in the footer. Labels "Less" and "All" flank the input. */
+.tc-throttle-wrap{display:flex;align-items:center;gap:4px;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;color:var(--c-dim);letter-spacing:.05em;text-transform:uppercase;}
+.tc-throttle-wrap input[type=range]{width:55px;height:14px;accent-color:var(--c-gold);cursor:pointer;}
+.tc-throttle-wrap .tc-thr-lbl{user-select:none;}
 #tc-live-dot{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--c-green);flex-shrink:0;animation:tc-pulse 2.5s ease-in-out infinite;}
 @keyframes tc-pulse{0%,100%{opacity:1;}50%{opacity:.15;}}
 #tc-rc-settings{display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;padding:20px 18px;flex:1;overflow-y:auto;}
@@ -3187,6 +3264,11 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
   <button id="tc-btn-settings" class="tc-foot-btn">Settings</button>
   <button id="tc-btn-back" class="tc-foot-btn" style="display:none">&#8592; Back</button>
   <button id="tc-btn-pause" class="tc-foot-btn">&#9208; Pause</button>
+  <span class="tc-throttle-wrap" title="Throttle commentary: Less = player-only, All = full">
+    <span class="tc-thr-lbl">Less</span>
+    <input id="tc-throttle" type="range" min="0" max="100" step="5" value="100">
+    <span class="tc-thr-lbl">All</span>
+  </span>
   <span id="tc-live-dot"></span>
 </div>`;
         document.body.appendChild(hud);
@@ -3273,6 +3355,25 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             }
             updatePauseBtn();
         });
+        // Throttle slider — set the persisted value and bind input handler.
+        // Per spec v2.73: live update on input so the user sees the effect
+        // immediately. No commentary message is fired on change (it's a
+        // density control, not a state toggle).
+        const throttleEl = document.getElementById('tc-throttle');
+        if (throttleEl) {
+            throttleEl.value = String(throttleValue);
+            throttleEl.addEventListener('input', function () {
+                const v = parseInt(throttleEl.value, 10);
+                if (!isNaN(v)) {
+                    throttleValue = Math.max(0, Math.min(100, v));
+                    // Reset the gate timestamp so a slider increase takes
+                    // effect right away rather than waiting for any prior
+                    // gap to expire.
+                    throttleNextAllowedAt = 0;
+                    saveThrottleValue();
+                }
+            });
+        }
         updatePauseBtn();
         if (typeof ResizeObserver !== 'undefined') {
             let lastSavedW = '', lastSavedH = '';
@@ -3330,6 +3431,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     function init () {
         try {
             loadState();
+            loadThrottleValue();
             commentaryPaused = false;
             buildHUD();
             rebuildFeed();
