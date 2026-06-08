@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.75.0
+// @version      2.76.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.75.0';
+    const SCRIPT_VERSION = '2.76.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v84';
+    const STORAGE_KEY = 'tc_racecomm_v85';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -410,7 +410,17 @@
                 '{player} threads every corner in the {car}. A measured drive.',
                 '{player} holds {pos} with real authority in the {car}.',
                 '{player} navigates the pack well. Eyes firmly on the prize.',
-                '{player} stays smooth and disciplined. Running {pos}.'
+                '{player} stays smooth and disciplined. Running {pos}.',
+                // Per spec v2.76: weave track-description flavour into
+                // player commentary. {trackFlavour} resolves to a phrase
+                // appropriate to the current track (e.g. "across the bridges",
+                // "past the cooling towers"). Falls back to a generic phrase
+                // when no specific track tags are active.
+                '{player} carries good speed {trackFlavour}.',
+                '{player} attacks {trackFlavour}, holding the racing line.',
+                'Holding {pos}, {player} threads neatly {trackFlavour}.',
+                '{player} pushes hard {trackFlavour} — full commitment in the {car}.',
+                'Watch {player} {trackFlavour}. They\'re finding tenths there.'
             ],
             funny: [
                 '{name} appears to be shooting at other cars.',
@@ -426,7 +436,11 @@
                 '{mover} surges forward, {moverFrom} to {moverTo}.',
                 'Position gained! {mover} moves from {moverFrom} to {moverTo}.',
                 '{mover} makes a brilliant move, from {moverFrom} to {moverTo}.',
-                'Up goes {mover}! From {moverFrom} to {moverTo} in a flash.'
+                'Up goes {mover}! From {moverFrom} to {moverTo} in a flash.',
+                // Per spec v2.76: weave track-description flavour into the
+                // overtake calls so they feel anchored to the actual track.
+                '{mover} makes the move {trackFlavour} — {moverFrom} to {moverTo}!',
+                'Brilliant pass {trackFlavour} for {mover} — {moverFrom} to {moverTo}.'
             ],
             moverDownEngine: [
                 '{faller} drops from {fallerFrom} to {fallerTo} — looks like engine trouble.',
@@ -460,7 +474,12 @@
                 '{p1name} and {p2name} locked in a fierce duel. Neither gives an inch.',
                 'The crowd on their feet as {p1name} and {p2name} go door to door.',
                 '{p1name} scrapes metal, {p2name} swerves with the impact.',
-                '{p1name} bumps their fender, {p2name} brake checks.'
+                '{p1name} bumps their fender, {p2name} brake checks.',
+                // Per spec v2.76: weave track-description flavour into
+                // proximity calls so duels feel rooted in the actual track.
+                '{p1name} and {p2name} side by side {trackFlavour}!',
+                'Door to door {trackFlavour} — {p1name} and {p2name} won\'t give an inch.',
+                '{p1name} tries the move on {p2name} {trackFlavour}. Brave stuff!'
             ],
             // These lines reference {p3} — ONLY used when racerCount >= 3
             position3: [
@@ -604,6 +623,14 @@
     // values roll a gap each time a line passes; the gap shrinks toward
     // zero as the slider approaches 100.
     let throttleNextAllowedAt = 0;
+
+    // Per spec v2.76: ambient picks should alternate between base+tier pool
+    // and track-description char-pool ("every other ambient message"). This
+    // counter increments on each ambientPoolFor() call that has a char-pool
+    // available, and the parity decides which pool to draw from. Session-only
+    // — resets to 0 on page load, which is fine because the alternation is
+    // about ambient density not strict ordering across sessions.
+    let ambientAlternator = 0;
 
     let recentByType = {
         ambient: [], player: [], position: [],
@@ -799,49 +826,152 @@
         lastFullDescAt = Date.now();
     }
 
-    // Detect track characteristics from the description text. Returns a set
-    // of keywords representing the surface, environment, and conditions, used
-    // to gate characteristic-specific commentary lines. The detection is
-    // keyword-based on the description text — simple and robust enough for
-    // typical Torn track descriptions.
+    // Detect track characteristics from the API description text. Returns a
+    // set of tags representing surface, layout, environment, and character
+    // traits. Per spec v2.76, tuned against the actual Torn /v2/racing/tracks
+    // descriptions so each Torn track resolves to meaningful tags. Dead pools
+    // (gravel/sand/ice) have been removed as those words don't appear in any
+    // Torn description. New tags added for the actual phrasing Torn uses —
+    // "rally", "straights", "hairpins", "razor sharp", "slalom", "bridges",
+    // factories/power plants, financial/shopping districts, jail, peninsula,
+    // lake, bay/coast, and so on. The detection also picks up driving-style
+    // hints (speed-focused, handling-focused, balanced) which let flavour
+    // lines reference what kind of car/skill the track rewards.
     function getTrackCharacteristics () {
         const info = getTrackInfo(state.track);
         if (!info || typeof info.description !== 'string') return {};
         const desc = info.description.toLowerCase();
         const tags = {};
-        // Surface
-        if (/\bmud\b|\bmuddy\b|\bdirt\b|\boff[- ]?road\b/.test(desc)) tags.mud = true;
-        if (/\btarmac\b|\basphalt\b|\bsmooth\b|\bpaved\b/.test(desc)) tags.tarmac = true;
-        if (/\bgravel\b|\bgrit\b|\bdusty\b|\bdust\b/.test(desc)) tags.gravel = true;
-        if (/\bsand\b|\bdune\b|\bdesert\b/.test(desc)) tags.sand = true;
-        if (/\bice\b|\bsnow\b|\bfrozen\b|\bfrost\b/.test(desc)) tags.ice = true;
-        if (/\bwater\b|\bwet\b|\brain\b|\bpuddle\b/.test(desc)) tags.wet = true;
-        // Layout / setting
-        if (/\bnarrow\b|\btight\b/.test(desc)) tags.narrow = true;
+
+        // ─ SURFACE ──
+        // Mud / off-road / rally / dirt — spec expanded per v2.76. The Torn
+        // descriptions use "rally", "off-road", "dirt road/path/section",
+        // and "rally tires" rather than the word "mud", so we cast wide.
+        if (/\bmud\b|\bmuddy\b|\bdirt\b|\boff[- ]?road\b|\brally\b|\brally\s+tires?\b|\brally\s+tyres?\b/.test(desc)) {
+            tags.mud = true;
+        }
+        // Tarmac — spec expanded per v2.76. Torn descriptions never use the
+        // word "tarmac" directly, but many proxies are reliable. Also catches
+        // "race track" (Stone Park), "water treatment plant" (Sewage —
+        // industrial = paved), "power plant" (Meltdown — also paved). These
+        // tracks are all tarmac per the community guides even though the
+        // description doesn't say so explicitly.
+        if (/\btarmac\b|\basphalt\b|\bsmooth\b|\bpaved\b|\bspeedway\b|\bstreet\s+race\b|\bcircuit\b|\bofficial\s+raceway\b|\brace\s+track\b|\bwater\s+treatment\s+plant\b|\bpower\s+plant\b/.test(desc)) {
+            tags.tarmac = true;
+        }
+        // Inferential tarmac: per spec "Create a routine which is clever
+        // enough to infer from track descriptions what the racing would be
+        // like". A track without explicit dirt/rally wording but with
+        // hallmarks of a paved surface — long straights at high speed, 90-
+        // degree bends, hairpins — is almost certainly tarmac. Catches
+        // Docks, which the explicit regex misses (no "tarmac" / "circuit"
+        // in its description, just "sprint through the docks").
+        if (!tags.mud && !tags.tarmac
+            && (/\b90\s*degree\b|\bhairpin/.test(desc)
+                || (/\bstraights?\b/.test(desc) && /\bspeed\b/.test(desc)))) {
+            tags.tarmac = true;
+        }
+
+        // ─ LAYOUT / FEATURES ──
+        if (/\bnarrow\b/.test(desc)) tags.narrow = true;
+        // "tight" is ambiguous — "tight corners" implies a narrow/twisty
+        // layout, but "few tight corners" implies the opposite. Only tag
+        // narrow when "tight" appears WITHOUT a preceding "few"/"no"/"without".
+        if (/\btight\b/.test(desc) && !/\b(few|no|without|lack\s+of|lacks?)\s+(\w+\s+){0,2}tight\b/.test(desc)) {
+            tags.narrow = true;
+        }
         if (/\bwide\b|\bopen\b|\bsweeping\b/.test(desc)) tags.wide = true;
-        if (/\boval\b|\bcircular\b|\bloop\b/.test(desc)) tags.oval = true;
-        if (/\btwist\b|\bturn\b|\bcorner\b|\bbend\b/.test(desc)) tags.twisty = true;
-        if (/\bhill\b|\belevation\b|\bclimb\b|\bdescent\b/.test(desc)) tags.hilly = true;
-        if (/\bjump\b|\bramp\b/.test(desc)) tags.jumps = true;
-        // Environment
-        if (/\bindustrial\b|\bfactory\b|\bwarehouse\b/.test(desc)) tags.industrial = true;
-        if (/\bdock\b|\bharbour\b|\bharbor\b|\bport\b|\bquay\b/.test(desc)) tags.docks = true;
-        if (/\bforest\b|\btree\b|\bwood\b/.test(desc)) tags.forest = true;
-        if (/\bcity\b|\burban\b|\bstreet\b/.test(desc)) tags.city = true;
-        if (/\bcountry\b|\brural\b|\bfarm\b|\bfield\b/.test(desc)) tags.country = true;
-        // Difficulty hints
-        if (/\bdangerous\b|\bbrutal\b|\bpunishing\b|\bunforgiving\b|\btough\b/.test(desc)) tags.brutal = true;
-        if (/\bfast\b|\bhigh[- ]speed\b|\bspeedway\b/.test(desc)) tags.fast = true;
-        if (/\btechnical\b|\bskill\b|\bprecision\b/.test(desc)) tags.technical = true;
+        if (/\bstraight(s|s)?\b|\blengthy\s+straight\b|\blong\s+straight\b/.test(desc)) tags.straights = true;
+        if (/\bhairpin/.test(desc)) tags.hairpins = true;
+        if (/\bslalom\b/.test(desc)) tags.slalom = true;
+        if (/\b90\s*degree\b|\bninety\s+degree\b|\bharsh\s+\d+\s+degree\b/.test(desc)) tags.rightAngles = true;
+        if (/\brazor\s+sharp\b|\bsharp\s+corner/.test(desc)) tags.sharpCorners = true;
+        if (/\bsoft\s+bend|\bsmooth\s+bend|\bcalm\b/.test(desc)) tags.softBends = true;
+        if (/\btwist|\bturn\b|\bcurvy\b|\bwindy\b|\btortuous\b|\bsquiggl/.test(desc)) tags.twisty = true;
+        if (/\bbend|\bcorner|\bslalom\b/.test(desc) && /\bvast\s+array\b|\bvariety\b|\barray\b/.test(desc)) {
+            tags.varied = true;
+        }
+        // Oval — require standalone words. "loops around the bay" should NOT
+        // match (it's just a transitive verb, not describing an oval). Match
+        // "oval", "circular", or "speedway" (Torn's official speedway IS the
+        // classic oval per community track guides).
+        if (/\boval\b|\bcircular\b|\bclassic\s+oval\b|\bspeedway\b/.test(desc)) tags.oval = true;
+        if (/\bhill|\belevation|\bclimb|\bdescent|\bpeninsula\b/.test(desc)) tags.hilly = true;
+
+        // ─ ENVIRONMENT / LOCATION ──
+        if (/\bindustrial\b|\bfactor(y|ies)\b|\bchemical\s+plant|\bwarehouse\b/.test(desc)) {
+            tags.industrial = true;
+        }
+        if (/\bdock|\bharbour|\bharbor|\bport\b|\bquay/.test(desc)) tags.docks = true;
+        if (/\bforest\b|\btree\b|\bwood\b|\bscenic\b/.test(desc)) tags.forest = true;
+        if (/\bcity\b|\burban\b|\bstreet\b|\bdistrict\b/.test(desc)) tags.city = true;
+        if (/\bcountry\b|\brural\b|\bfarm\b|\bfield\b|\bpark\b/.test(desc)) tags.country = true;
+        // Bridges / water / coast — Withdrawal, Two Islands, Hammerhead, Meltdown
+        if (/\bbridge|\bbay\b|\bcoast\b|\bsea\b|\bisland|\blake\b|\bpeninsula\b|\bwater\b/.test(desc)) {
+            tags.water = true;
+        }
+        if (/\bbridge/.test(desc)) tags.bridges = true;
+        if (/\bisland/.test(desc)) tags.islands = true;
+        if (/\blake\b/.test(desc)) tags.lake = true;
+        if (/\bpower\s+plant\b|\bpower\s+station\b|\bcooling\s+tower|\bfunnel/.test(desc)) {
+            tags.powerPlant = true;
+        }
+        if (/\bwater\s+treatment\b|\bsewage\b/.test(desc)) tags.waterTreatment = true;
+        if (/\bjail\b|\bprison\b/.test(desc)) tags.jail = true;
+        if (/\bfinancial\b/.test(desc)) tags.financial = true;
+        if (/\bshopping\b|\bcommerce\b|\bshop/.test(desc)) tags.shopping = true;
+        if (/\bfreight\b|\bheavy\s+goods\b|\bhgv\b|\btruck/.test(desc)) tags.freight = true;
+        if (/\billegal\b/.test(desc)) tags.illegal = true;
+        if (/\brich(er)?\s+district|\baffluent\b|\bupmarket\b/.test(desc)) tags.upmarket = true;
+
+        // ─ CHARACTER / DIFFICULTY HINTS ──
+        if (/\bdangerous\b|\bbrutal\b|\bpunishing\b|\bunforgiving\b|\btough\b|\bperilous\b|\bthreatening\b|\bwipe\s+out\b|\bvery\s+unforgiving\b/.test(desc)) {
+            tags.brutal = true;
+        }
+        if (/\bfast\b|\bhigh[- ]speed\b|\bspeedway\b|\bpure\s+speed\b|\bspeed\s+is\s+of\s+the\s+essence\b/.test(desc)) {
+            tags.fast = true;
+        }
+        if (/\btechnical\b|\bskill\b|\bprecision\b|\bdemands\s+considerable\b|\bdemands\s+a\s+great\s+deal\b/.test(desc)) {
+            tags.technical = true;
+        }
+        if (/\bbalanced\b|\bbalance\s+of\s+all\b|\beven\s+balance\b|\bbalance\s+of\b/.test(desc)) {
+            tags.balanced = true;
+        }
+        if (/\blegendary\b|\bperfect\s+track\b|\bfamous\b/.test(desc)) tags.legendary = true;
+        if (/\bacceleration\b/.test(desc) && !/\band\s+speed\b|\bspeed\s+and\b/.test(desc)) {
+            tags.accelFocus = true;
+        }
+        if (/\bhandling\b/.test(desc) && /\bhigher\s+handling\b|\bconsiderable\s+handling\b|\bdemands.*handling\b/.test(desc)) {
+            tags.handlingFocus = true;
+        }
+        if (/\bbraking\b/.test(desc) && /\bhigher\s+braking\b|\bbetter\s+braking\b/.test(desc)) {
+            tags.brakingFocus = true;
+        }
+        if (/\bginormous\b|\blarge\b|\blengthy\b|\bgoliath\b|\blongest\b/.test(desc)) tags.large = true;
+        if (/\bshort\b/.test(desc)) tags.short = true;
+
         return tags;
     }
 
-    // Characteristic-based ambient line pool. Each entry is { tag, lines }
-    // where `tag` is a characteristic key from getTrackCharacteristics() and
-    // `lines` are matching flavour messages. ambientPoolFor merges in lines
-    // for all active tags. These are NOT gated by the 20-min throttle since
-    // they don't quote the full description text.
+    // Characteristic-based ambient line pool. Per spec v2.76, rebuilt around
+    // the actual Torn track descriptions. Each entry is { tag, lines } where
+    // `tag` is a key produced by getTrackCharacteristics() and `lines` are
+    // matching flavour messages. ambientPoolFor merges in lines for all
+    // active tags. These are NOT gated by the 20-min throttle since they
+    // don't quote the full description text — they're flavour lines derived
+    // from inferred characteristics.
+    //
+    // DEAD POOLS REMOVED in v2.76 (per spec: "remove dead pools of types of
+    // track which aren't needed"): gravel, sand, ice, wet, jumps. None of
+    // these tags ever fire against the Torn track set.
+    //
+    // NEW TAGS ADDED in v2.76 to reflect Torn-specific track features:
+    //   straights, hairpins, rightAngles, sharpCorners, softBends, varied,
+    //   water, bridges, islands, lake, powerPlant, waterTreatment, jail,
+    //   financial, shopping, freight, illegal, upmarket, balanced,
+    //   legendary, accelFocus, handlingFocus, brakingFocus, large, short.
     const TRACK_CHARACTERISTIC_LINES = [
+        // ─── SURFACE ──
         { tag: 'mud', lines: [
             'Mud sprays in every direction. Drivers fighting for grip.',
             'The mud is doing the talking — cars sliding everywhere.',
@@ -852,7 +982,12 @@
             'Visibility through the screen is almost zero — wipers earning their keep.',
             'One bad line and the mud will eat your race.',
             'The racing line is a thin strip of slightly less mud than the rest.',
-            'Lap times suffering badly out there. The mud is a great leveller.'
+            'Lap times suffering badly out there. The mud is a great leveller.',
+            'Anyone without four-wheel-drive is finding this hard going.',
+            'Rally-spec setup is the only thing keeping these cars pointing forward.',
+            'Off-road sections eating into the laps. Tyres choosing the line, not the drivers.',
+            'A rally car would be in heaven here. Everything else is in trouble.',
+            'Sliding under acceleration, sliding under braking — that is rally driving.'
         ]},
         { tag: 'tarmac', lines: [
             'Smooth tarmac means the fast cars are in their element.',
@@ -862,41 +997,14 @@
             'You can hear the tyres squealing — that grip you only get on good tarmac.',
             'Setup matters everywhere, but on tarmac the differences really show.',
             'Drivers can lean on the tyres here. The grip is there to be used.',
-            'A surface that rewards precision — and punishes the timid.'
+            'A surface that rewards precision — and punishes the timid.',
+            'On a circuit like this, every lap should be within a tenth.',
+            'Quality tarmac under the wheels. The grip is consistent everywhere.',
+            'A proper racing surface — drivers can attack every corner with confidence.',
+            'No excuses on a tarmac circuit. Lap times tell the truth.'
         ]},
-        { tag: 'gravel', lines: [
-            'Gravel kicks up at every braking zone.',
-            'Stones spray from the rear wheels with every corner.',
-            'A dusty haze hangs over the track. Visibility is a constant worry.',
-            'The gravel works against the throttle — drivers fighting wheelspin.',
-            'Every braking zone leaves a cloud of dust hanging in the air.',
-            'Rocks pinging off bodywork. Paint jobs will not survive this.',
-            'On gravel, smooth and patient wins the day. The hard chargers come unstuck.'
-        ]},
-        { tag: 'sand', lines: [
-            'Sand drifts across the racing line. Treacherous footing.',
-            'Each car leaves a plume of dust behind it.',
-            'Sand in the eyes of any spectator brave enough to stand close.',
-            'The wind shifts the sand from lap to lap — the line is never quite the same twice.',
-            'Tyres digging through the sand, throwing up rooster-tails behind.',
-            'Sand finds its way into every gap on the car. Mechanics will be at this for hours.'
-        ]},
-        { tag: 'ice', lines: [
-            'On the ice, even the slightest input matters.',
-            'A car slides wide — ice has no mercy.',
-            'Surface temperatures must be brutal. Tyres struggling for purchase.',
-            'Like driving on glass out there. One twitch and you are off.',
-            'The ice tells you exactly what kind of driver you are.',
-            'No room for heroics on a surface like this. Patience or punishment.'
-        ]},
-        { tag: 'wet', lines: [
-            'Spray from the leading cars makes overtaking guesswork.',
-            'A wet line, a dry line — drivers picking their way through.',
-            'Every puddle a potential trip to the wall.',
-            'Aquaplaning is a real risk down the long straights.',
-            'The rain finds the gaps even the bravest drivers do not want to see.',
-            'Half the lap is on the limit, the other half is sheer guesswork.'
-        ]},
+
+        // ─── LAYOUT / FEATURES ──
         { tag: 'narrow', lines: [
             'Tight, narrow track — no margin for error here.',
             'Two abreast is a luxury on this circuit.',
@@ -911,6 +1019,35 @@
             'Three abreast through some corners — there is room if you commit.',
             'The width of this track lets drivers be creative with their lines.'
         ]},
+        { tag: 'straights', lines: [
+            'Those long straights are eating up the laps.',
+            'Top speed matters here — and the slipstream is in play.',
+            'Down the long straight and the engines are absolutely howling.',
+            'Plenty of running room down the straights. Slipstream battles brewing.',
+            'A track that rewards a strong straight-line car.',
+            'The straights here are a chance to draw breath — and pick a passing place.'
+        ]},
+        { tag: 'hairpins', lines: [
+            'The hairpins are where this race will be won or lost.',
+            'Through the hairpin, brakes glowing red, drivers wrestling the cars round.',
+            'Hairpin entry — the latest brakers gain a place every lap.',
+            'Anyone who gets the hairpin wrong is going to find a wall.'
+        ]},
+        { tag: 'rightAngles', lines: [
+            'Those 90-degree bends are unforgiving — brake too late and you are off.',
+            'The right-angle turns are sapping all the speed from the long straights.',
+            'Sharp corner exits — traction matters more than top speed.'
+        ]},
+        { tag: 'sharpCorners', lines: [
+            'Razor-sharp corners catching out anyone who oversteps the mark.',
+            'A circuit full of sharp corners — every braking zone a potential incident.',
+            'The sharpness of these corners is brutal on tyres.'
+        ]},
+        { tag: 'softBends', lines: [
+            'Smooth, flowing bends here — drivers can carry serious speed.',
+            'The soft bends reward those who keep momentum.',
+            'Easy on the steering, hard on the throttle — these gentle bends suit the brave.'
+        ]},
         { tag: 'twisty', lines: [
             'Corner after corner — no time to breathe.',
             'A test of patience as much as speed. The lines are everything.',
@@ -919,32 +1056,32 @@
             'The flow matters more than outright pace through this lot.',
             'Get one corner wrong and the next three are compromised.'
         ]},
-        { tag: 'fast', lines: [
-            'High-speed running here — engines screaming at their limit.',
-            'Top gear most of the lap. This is flat-out stuff.',
-            'Cars blasting past so fast the crowd feels the wind.',
-            'The straights are eating up the laps. Speeds nudging the limit.',
-            'On a fast circuit, aerodynamics matter as much as engine power.'
+        { tag: 'varied', lines: [
+            'No two corners the same here — every braking zone needs a different approach.',
+            'The variety of bends keeps the drivers honest. No autopilot on this track.',
+            'A real menu of corner types out there. The complete driver gets rewarded.'
         ]},
-        { tag: 'brutal', lines: [
-            'A track that punishes mistakes. Every driver knows it.',
-            'Unforgiving circuit — one error and the race is over.',
-            'Brutal layout, brutal consequences.',
-            'No second chances on a circuit like this.',
-            'The wall is never far away. The drivers know it.'
+        { tag: 'oval', lines: [
+            'Round and round we go — oval racing is its own discipline.',
+            'Constant left-handers mean uneven tyre wear.',
+            'On an oval, the slipstream is king.'
         ]},
-        { tag: 'technical', lines: [
-            'A technical circuit — the drivers who do their homework get rewarded.',
-            'Lap times here come from precision, not bravery.',
-            'Every corner has a specific entry, apex, and exit. No improvising.',
-            'The setup work pays off on a track this demanding.'
+        { tag: 'hilly', lines: [
+            'Elevation changes make this one a real challenge.',
+            'A blind crest — the brave commit, the rest lift.',
+            'Going downhill, the brakes are taking a hammering.',
+            'Climbing through the gears on the uphill drag — drivers leaning forward.',
+            'Drivers cresting the rise and reaching for the brakes almost in the same moment.'
         ]},
+
+        // ─── ENVIRONMENT / LOCATION ──
         { tag: 'industrial', lines: [
             'Industrial backdrop adds to the atmosphere — and the smell.',
             'Factory walls echo the engine noise back twice as loud.',
             'Steel and concrete on every side. No room for sightseeing.',
             'The clatter of industry mixes with the bark of the exhausts.',
-            'Warehouse roofs, chimneys, machinery — a track with a working backdrop.'
+            'Warehouse roofs, chimneys, machinery — a track with a working backdrop.',
+            'Chemical plants either side — fumes and engine noise blending together.'
         ]},
         { tag: 'docks', lines: [
             'The dock cranes loom overhead. A unique stage for racing.',
@@ -970,25 +1107,131 @@
         { tag: 'country', lines: [
             'Rolling countryside as a backdrop. Beautiful — and quick.',
             'Hedgerows and farm gates flicker past at racing speed.',
-            'Out in the country, the only sound is engine noise and the occasional sheep.'
+            'Out in the country, the only sound is engine noise and the occasional sheep.',
+            'Through the park, the trees blurring past at racing speed.'
         ]},
-        { tag: 'hilly', lines: [
-            'Elevation changes make this one a real challenge.',
-            'A blind crest — the brave commit, the rest lift.',
-            'Going downhill, the brakes are taking a hammering.',
-            'Climbing through the gears on the uphill drag — drivers leaning forward.',
-            'Drivers cresting the rise and reaching for the brakes almost in the same moment.'
+        { tag: 'water', lines: [
+            'Glimpses of water between the corners — a striking backdrop.',
+            'The bay glittering in the distance as the cars thunder past.',
+            'Spectators along the waterfront getting the best view in town.'
         ]},
-        { tag: 'jumps', lines: [
-            'A jump ahead — and the brave keep their foot in!',
-            'Suspension takes a pounding off every ramp.',
-            'Wheels off the ground momentarily — pure spectacle.',
-            'Landings shake the cars to their bolts. The mechanics will be working overtime.'
+        { tag: 'bridges', lines: [
+            'Across the bridges, the cars compress together — overtaking gets risky here.',
+            'Those old bridges are a real bottleneck. Watch for contact.',
+            'The bridges look ready to give up at any moment — racing across them takes nerve.',
+            'Crossing the bridge, the cars\' suspension thumping over the joins.'
         ]},
-        { tag: 'oval', lines: [
-            'Round and round we go — oval racing is its own discipline.',
-            'Constant left-handers mean uneven tyre wear.',
-            'On an oval, the slipstream is king.'
+        { tag: 'islands', lines: [
+            'Looping round the islands — the layout twists in ways nobody expects.',
+            'The island section is where the brave drivers find time on the rest.',
+            'Slingshotting around the coastline of the islands at full noise.'
+        ]},
+        { tag: 'lake', lines: [
+            'The lake mirrors the sky as the cars flick past at speed.',
+            'Round the lake the spray from the leading cars hangs in the air.',
+            'The little island in the middle of the lake — connected by those creaking bridges.'
+        ]},
+        { tag: 'powerPlant', lines: [
+            'Round the cooling towers, the cars briefly out of sight from the crowd.',
+            'Engines roaring under the shadow of the power plant funnels.',
+            'A peninsula track with the power station looming over every corner.',
+            'Spectators near the funnels covering their ears — the noise is unbearable.'
+        ]},
+        { tag: 'waterTreatment', lines: [
+            'Round the water treatment plant — not the most glamorous backdrop.',
+            'The smell out here is something else. Drivers happy to keep windows up.',
+            'Every corner here brings a different surprise.'
+        ]},
+        { tag: 'jail', lines: [
+            'Past the entrance of the jail — the inmates probably have the best view in town.',
+            'Sirens from the jail mixing with the engine noise. Atmospheric stuff.',
+            'Racing past the prison walls — the irony of an illegal race not lost on anyone.'
+        ]},
+        { tag: 'financial', lines: [
+            'Through the financial district, glass towers reflecting the cars back at us.',
+            'Bankers in their office windows watching the carnage below.',
+            'The financial district makes for a glamorous, if unlikely, racing backdrop.'
+        ]},
+        { tag: 'shopping', lines: [
+            'Round the shopping district — shoppers running for cover.',
+            'The shop fronts blurring past at racing speeds.',
+            'A street circuit through the high street. The shoppers are not amused.'
+        ]},
+        { tag: 'freight', lines: [
+            'A real risk of meeting a freight truck round the next bend.',
+            'Heavy goods vehicles still using these roads — adds a hazard you won\'t find on a real circuit.',
+            'Anyone who finds a lorry on the racing line is having a bad day.'
+        ]},
+        { tag: 'illegal', lines: [
+            'This is unlicensed racing at its finest — no rules, no mercy.',
+            'Marshalls? On a track like this? The drivers police themselves.',
+            'An illegal street race — the police know but turn a blind eye.'
+        ]},
+        { tag: 'upmarket', lines: [
+            'The richer districts make a fine backdrop for engine noise and rubber smoke.',
+            'Residents of these expensive houses are not getting any sleep tonight.',
+            'High-end streetlights and manicured verges — and 100mph race cars.'
+        ]},
+
+        // ─── CHARACTER / DIFFICULTY HINTS ──
+        { tag: 'brutal', lines: [
+            'A track that punishes mistakes. Every driver knows it.',
+            'Unforgiving circuit — one error and the race is over.',
+            'Brutal layout, brutal consequences.',
+            'No second chances on a circuit like this.',
+            'The wall is never far away. The drivers know it.',
+            'One wrong move out there will end your race in spectacular fashion.'
+        ]},
+        { tag: 'fast', lines: [
+            'High-speed running here — engines screaming at their limit.',
+            'Top gear most of the lap. This is flat-out stuff.',
+            'Cars blasting past so fast the crowd feels the wind.',
+            'The straights are eating up the laps. Speeds nudging the limit.',
+            'On a fast circuit, aerodynamics matter as much as engine power.',
+            'Pure speed is what wins here. No hiding place for the under-powered.'
+        ]},
+        { tag: 'technical', lines: [
+            'A technical circuit — the drivers who do their homework get rewarded.',
+            'Lap times here come from precision, not bravery.',
+            'Every corner has a specific entry, apex, and exit. No improvising.',
+            'The setup work pays off on a track this demanding.'
+        ]},
+        { tag: 'balanced', lines: [
+            'A track that needs everything — speed, handling, braking, acceleration.',
+            'No single weakness can be hidden on a balanced circuit.',
+            'The all-rounder cars come into their own out there.',
+            'Drivers without a complete skillset will be exposed today.'
+        ]},
+        { tag: 'legendary', lines: [
+            'A legendary stretch of tarmac — every racer wants their name on its record board.',
+            'Designed by racing professionals — and it shows in every corner.',
+            'The "perfect track" some have called it. Hard to disagree.',
+            'Few places carry the racing history that this one does.'
+        ]},
+        { tag: 'accelFocus', lines: [
+            'Short bursts of acceleration matter more than top speed on a layout like this.',
+            'Cars that can pick up the throttle hard out of slow corners thrive here.',
+            'Acceleration drivers are licking their lips at the look of this track.'
+        ]},
+        { tag: 'handlingFocus', lines: [
+            'This is a handling track — the wheel does more work than the throttle.',
+            'Quick steering and confident car placement win out here.',
+            'Pure horsepower is no help on a track that demands handling.'
+        ]},
+        { tag: 'brakingFocus', lines: [
+            'Braking points are everything on a track like this.',
+            'Strong brakes will save a driver a fortune in tenths today.',
+            'Anyone with weak brakes is going to find themselves outclassed.'
+        ]},
+        { tag: 'large', lines: [
+            'A monster of a circuit. The drivers earn every metre.',
+            'On a track this size, pacing matters as much as outright pace.',
+            'Long laps, long races, plenty of time for plot twists.'
+        ]},
+        { tag: 'short', lines: [
+            'A short track means traffic is constant — lapped cars from lap two onwards.',
+            'On a layout this short, even the smallest error costs places.',
+            'The brevity of the lap makes setup adjustments hard to dial in.'
         ]}
     ];
 
@@ -1207,22 +1450,24 @@
         if (tierKey && Array.isArray(statusLines[tierKey]) && statusLines[tierKey].length) {
             out = out.concat(statusLines[tierKey]);
         }
-        // Per spec v2.74: when track description characteristic lines are
-        // available, they should make up ~50% of the ambient pool. We weight
-        // by repeating the char pool enough times to balance against the
-        // base+tier pool above. Repetition is fine because pickLine() de-dupes
-        // recent picks — so a repeated line just gets a higher draw weight,
-        // not a higher chance of immediate re-fire.
-        // These lines are derived from description KEYWORDS and don't quote
-        // the full description text, so they're NOT rate-limited (unlike
-        // apiAmbient below).
+        // Per spec v2.76: track-description ambient lines should be used
+        // "every other ambient message". We achieve this by toggling a
+        // module-level counter on each call. On even ticks (when char-pool
+        // available), return ONLY the char-pool — the picker will then draw
+        // exclusively from track-description-flavoured lines for that turn.
+        // On odd ticks, return the base+tier mix without the char-pool. The
+        // result is a near-perfect 50/50 alternation in practice.
+        // If no char-pool is available (no description fetched / no tags
+        // detected), just return base+tier as before.
         const charPool = characteristicAmbientPool();
         if (charPool.length) {
-            // Target: charPool weight ≈ base weight. reps = ceil(base / char).
-            const baseLen = out.length;
-            const reps = Math.max(1, Math.ceil(baseLen / charPool.length));
-            for (let i = 0; i < reps; i++) {
-                out = out.concat(charPool);
+            ambientAlternator++;
+            if (ambientAlternator % 2 === 0) {
+                // Return char-pool ONLY for this draw — alternation step.
+                // The 20-min apiAmbient (full-description verbatim) is still
+                // gated below, but we don't merge it here on alternation
+                // turns since the char-pool is the source for this tick.
+                return charPool;
             }
         }
         // Merge API-flavoured pool only when (a) description available AND
@@ -1327,6 +1572,43 @@
                 }
                 // Got slower — sign is plus.
                 return '+' + absRound + ' slower than last average';
+            })(),
+            // {trackFlavour} — per spec v2.76, a short context-appropriate
+            // phrase derived from the track's characteristics that can be
+            // dropped into player/proximity/movement commentary. Resolves to
+            // a track-specific fragment like "across the bridges", "past
+            // the funnels", "through the slalom", "down the long straight"
+            // based on which tags fired for the current track. Falls back
+            // to a generic phrase when no specific tags are active. This is
+            // what gives lap-by-lap commentary track-aware texture without
+            // needing track-specific templates.
+            trackFlavour: (function () {
+                const tags = getTrackCharacteristics();
+                const phrases = [];
+                if (tags.slalom)         phrases.push('through the slalom');
+                if (tags.hairpins)       phrases.push('through the hairpins');
+                if (tags.rightAngles)    phrases.push('into the 90-degree bends');
+                if (tags.sharpCorners)   phrases.push('into the razor-sharp corners');
+                if (tags.softBends)      phrases.push('through the gentle bends');
+                if (tags.straights)      phrases.push('down the long straight');
+                if (tags.bridges)        phrases.push('across the bridges');
+                if (tags.lake)           phrases.push('round the lake');
+                if (tags.islands)        phrases.push('round the island');
+                if (tags.powerPlant)     phrases.push('past the cooling towers');
+                if (tags.waterTreatment) phrases.push('past the treatment plant');
+                if (tags.jail)           phrases.push('past the jail');
+                if (tags.financial)     phrases.push('through the financial district');
+                if (tags.shopping)       phrases.push('through the shopping district');
+                if (tags.docks)          phrases.push('round the dock cranes');
+                if (tags.industrial)     phrases.push('between the factory walls');
+                if (tags.water)          phrases.push('along the waterfront');
+                if (tags.country)        phrases.push('through the park');
+                if (tags.upmarket)       phrases.push('through the rich district');
+                if (tags.mud)            phrases.push('through the dirt section');
+                if (tags.oval)           phrases.push('round the banking');
+                if (tags.hilly)          phrases.push('over the rise');
+                if (!phrases.length) phrases.push('through the field');
+                return phrases[Math.floor(Math.random() * phrases.length)];
             })()
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
