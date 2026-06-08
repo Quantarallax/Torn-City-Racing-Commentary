@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.73.0
+// @version      2.74.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.73.0';
+    const SCRIPT_VERSION = '2.74.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v82';
+    const STORAGE_KEY = 'tc_racecomm_v83';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -842,88 +842,148 @@
             'The mud is doing the talking — cars sliding everywhere.',
             'Tyres caked in mud. Steering inputs need to be smoother than ever.',
             'A car comes past, its bodywork barely visible under the mud.',
-            'Mechanics will be cursing tonight. Every panel coated in filth.'
+            'Mechanics will be cursing tonight. Every panel coated in filth.',
+            'Mud flicks up off the rear wheels in great brown arcs.',
+            'Visibility through the screen is almost zero — wipers earning their keep.',
+            'One bad line and the mud will eat your race.',
+            'The racing line is a thin strip of slightly less mud than the rest.',
+            'Lap times suffering badly out there. The mud is a great leveller.'
         ]},
         { tag: 'tarmac', lines: [
             'Smooth tarmac means the fast cars are in their element.',
             'On this surface, grip is consistent and lap times tumble.',
             'Tarmac like a billiard table — no excuses for slow times.',
-            'Cars are hooked up beautifully on this surface.'
+            'Cars are hooked up beautifully on this surface.',
+            'You can hear the tyres squealing — that grip you only get on good tarmac.',
+            'Setup matters everywhere, but on tarmac the differences really show.',
+            'Drivers can lean on the tyres here. The grip is there to be used.',
+            'A surface that rewards precision — and punishes the timid.'
         ]},
         { tag: 'gravel', lines: [
             'Gravel kicks up at every braking zone.',
             'Stones spray from the rear wheels with every corner.',
-            'A dusty haze hangs over the track. Visibility is a constant worry.'
+            'A dusty haze hangs over the track. Visibility is a constant worry.',
+            'The gravel works against the throttle — drivers fighting wheelspin.',
+            'Every braking zone leaves a cloud of dust hanging in the air.',
+            'Rocks pinging off bodywork. Paint jobs will not survive this.',
+            'On gravel, smooth and patient wins the day. The hard chargers come unstuck.'
         ]},
         { tag: 'sand', lines: [
             'Sand drifts across the racing line. Treacherous footing.',
             'Each car leaves a plume of dust behind it.',
-            'Sand in the eyes of any spectator brave enough to stand close.'
+            'Sand in the eyes of any spectator brave enough to stand close.',
+            'The wind shifts the sand from lap to lap — the line is never quite the same twice.',
+            'Tyres digging through the sand, throwing up rooster-tails behind.',
+            'Sand finds its way into every gap on the car. Mechanics will be at this for hours.'
         ]},
         { tag: 'ice', lines: [
             'On the ice, even the slightest input matters.',
             'A car slides wide — ice has no mercy.',
-            'Surface temperatures must be brutal. Tyres struggling for purchase.'
+            'Surface temperatures must be brutal. Tyres struggling for purchase.',
+            'Like driving on glass out there. One twitch and you are off.',
+            'The ice tells you exactly what kind of driver you are.',
+            'No room for heroics on a surface like this. Patience or punishment.'
         ]},
         { tag: 'wet', lines: [
             'Spray from the leading cars makes overtaking guesswork.',
             'A wet line, a dry line — drivers picking their way through.',
-            'Every puddle a potential trip to the wall.'
+            'Every puddle a potential trip to the wall.',
+            'Aquaplaning is a real risk down the long straights.',
+            'The rain finds the gaps even the bravest drivers do not want to see.',
+            'Half the lap is on the limit, the other half is sheer guesswork.'
         ]},
         { tag: 'narrow', lines: [
             'Tight, narrow track — no margin for error here.',
             'Two abreast is a luxury on this circuit.',
-            'The walls feel like they\'re closing in.'
+            'The walls feel like they\'re closing in.',
+            'Overtaking opportunities are rarer than diamonds out there.',
+            'A circuit that demands respect — there is nowhere to hide.'
         ]},
         { tag: 'wide', lines: [
             'Wide enough to take a real run at it. Drivers using every inch.',
             'Lots of space to set up overtakes here.',
-            'Open layout suits the brave.'
+            'Open layout suits the brave.',
+            'Three abreast through some corners — there is room if you commit.',
+            'The width of this track lets drivers be creative with their lines.'
         ]},
         { tag: 'twisty', lines: [
             'Corner after corner — no time to breathe.',
             'A test of patience as much as speed. The lines are everything.',
-            'The drivers earning every metre through these twists.'
+            'The drivers earning every metre through these twists.',
+            'Steering wheels rarely sit straight on a layout like this.',
+            'The flow matters more than outright pace through this lot.',
+            'Get one corner wrong and the next three are compromised.'
         ]},
         { tag: 'fast', lines: [
             'High-speed running here — engines screaming at their limit.',
             'Top gear most of the lap. This is flat-out stuff.',
-            'Cars blasting past so fast the crowd feels the wind.'
+            'Cars blasting past so fast the crowd feels the wind.',
+            'The straights are eating up the laps. Speeds nudging the limit.',
+            'On a fast circuit, aerodynamics matter as much as engine power.'
         ]},
         { tag: 'brutal', lines: [
             'A track that punishes mistakes. Every driver knows it.',
             'Unforgiving circuit — one error and the race is over.',
-            'Brutal layout, brutal consequences.'
+            'Brutal layout, brutal consequences.',
+            'No second chances on a circuit like this.',
+            'The wall is never far away. The drivers know it.'
+        ]},
+        { tag: 'technical', lines: [
+            'A technical circuit — the drivers who do their homework get rewarded.',
+            'Lap times here come from precision, not bravery.',
+            'Every corner has a specific entry, apex, and exit. No improvising.',
+            'The setup work pays off on a track this demanding.'
         ]},
         { tag: 'industrial', lines: [
             'Industrial backdrop adds to the atmosphere — and the smell.',
             'Factory walls echo the engine noise back twice as loud.',
-            'Steel and concrete on every side. No room for sightseeing.'
+            'Steel and concrete on every side. No room for sightseeing.',
+            'The clatter of industry mixes with the bark of the exhausts.',
+            'Warehouse roofs, chimneys, machinery — a track with a working backdrop.'
         ]},
         { tag: 'docks', lines: [
             'The dock cranes loom overhead. A unique stage for racing.',
             'Salt air, diesel fumes, and the roar of engines.',
-            'You can almost taste the sea between corners.'
+            'You can almost taste the sea between corners.',
+            'Shipping containers stacked like grandstands either side.',
+            'The smell of fuel and brine — there is nowhere quite like racing at the docks.'
         ]},
         { tag: 'forest', lines: [
             'Trees lining the track turn it into a tunnel of green.',
             'Branches overhead, leaves on the line — a different kind of hazard.',
-            'The forest absorbs some of the noise. Almost peaceful, almost.'
+            'The forest absorbs some of the noise. Almost peaceful, almost.',
+            'A wildlife sighting between corners — they have got used to the noise.',
+            'Sun and shadow flicker through the canopy at racing speed.'
         ]},
         { tag: 'city', lines: [
             'Concrete walls and street furniture — nowhere to put a wheel wrong.',
             'Urban racing at its most uncompromising.',
-            'Manhole covers and kerbs to think about as well as the corners.'
+            'Manhole covers and kerbs to think about as well as the corners.',
+            'Painted lines on the road become hazards in the wet.',
+            'The buildings funnel the noise straight back at the crowd.'
+        ]},
+        { tag: 'country', lines: [
+            'Rolling countryside as a backdrop. Beautiful — and quick.',
+            'Hedgerows and farm gates flicker past at racing speed.',
+            'Out in the country, the only sound is engine noise and the occasional sheep.'
         ]},
         { tag: 'hilly', lines: [
             'Elevation changes make this one a real challenge.',
             'A blind crest — the brave commit, the rest lift.',
-            'Going downhill, the brakes are taking a hammering.'
+            'Going downhill, the brakes are taking a hammering.',
+            'Climbing through the gears on the uphill drag — drivers leaning forward.',
+            'Drivers cresting the rise and reaching for the brakes almost in the same moment.'
         ]},
         { tag: 'jumps', lines: [
             'A jump ahead — and the brave keep their foot in!',
             'Suspension takes a pounding off every ramp.',
-            'Wheels off the ground momentarily — pure spectacle.'
+            'Wheels off the ground momentarily — pure spectacle.',
+            'Landings shake the cars to their bolts. The mechanics will be working overtime.'
+        ]},
+        { tag: 'oval', lines: [
+            'Round and round we go — oval racing is its own discipline.',
+            'Constant left-handers mean uneven tyre wear.',
+            'On an oval, the slipstream is king.'
         ]}
     ];
 
@@ -1142,12 +1202,23 @@
         if (tierKey && Array.isArray(statusLines[tierKey]) && statusLines[tierKey].length) {
             out = out.concat(statusLines[tierKey]);
         }
-        // Merge characteristic-derived pool (mud/tarmac/etc) when description tags
-        // are detected. These are NOT rate-limited because they don't quote the
-        // full description text — they're flavour lines derived from keywords.
+        // Per spec v2.74: when track description characteristic lines are
+        // available, they should make up ~50% of the ambient pool. We weight
+        // by repeating the char pool enough times to balance against the
+        // base+tier pool above. Repetition is fine because pickLine() de-dupes
+        // recent picks — so a repeated line just gets a higher draw weight,
+        // not a higher chance of immediate re-fire.
+        // These lines are derived from description KEYWORDS and don't quote
+        // the full description text, so they're NOT rate-limited (unlike
+        // apiAmbient below).
         const charPool = characteristicAmbientPool();
         if (charPool.length) {
-            out = out.concat(charPool);
+            // Target: charPool weight ≈ base weight. reps = ceil(base / char).
+            const baseLen = out.length;
+            const reps = Math.max(1, Math.ceil(baseLen / charPool.length));
+            for (let i = 0; i < reps; i++) {
+                out = out.concat(charPool);
+            }
         }
         // Merge API-flavoured pool only when (a) description available AND
         // (b) the 20-minute gate is open. The apiAmbient lines DO quote the
@@ -3165,6 +3236,8 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
 .tc-cred-by strong{color:var(--c-gold);}
 .tc-cred-plink{color:var(--c-blue);font-size:12px;}
 .tc-cred-plink:hover{text-decoration:underline;}
+.tc-cred-forum{color:var(--c-blue);font-size:12px;text-decoration:none;margin-top:4px;}
+.tc-cred-forum:hover{text-decoration:underline;}
 .tc-cred-msg{font-size:12px;color:var(--c-muted);line-height:1.7;margin-top:4px;}
 #tc-rc-lb-list::-webkit-scrollbar,#tc-feed-inner::-webkit-scrollbar{width:4px;}
 #tc-rc-lb-list::-webkit-scrollbar-track,#tc-feed-inner::-webkit-scrollbar-track{background:transparent;}
@@ -3232,7 +3305,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     <div class="tc-cred-ver">Version ${escH(SCRIPT_VERSION)}</div>
     <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
     <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
-    <div class="tc-cred-msg">Bugs &amp; feedback welcome!<br>Find me in-game on Torn City.</div>
+    <a class="tc-cred-forum" href="https://www.torn.com/forums.php#/p=threads&amp;f=21&amp;t=16559767&amp;b=0&amp;a=0&amp;start=20&amp;to=0" target="_blank" rel="noopener">Forum link: Bugs, feedback welcome!</a>
     <div class="tc-set-divider"></div>
     <div class="tc-set-row">
       <span class="tc-set-lbl">Commentary scroll</span>
