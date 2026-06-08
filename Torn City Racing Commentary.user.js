@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.74.0
+// @version      2.75.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.74.0';
+    const SCRIPT_VERSION = '2.75.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v83';
+    const STORAGE_KEY = 'tc_racecomm_v84';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -476,7 +476,12 @@
                 '{leader} holds the lead but {p2} applies relentless pressure.',
                 '{p2} presses hard on {leader}. Every corner a potential overtake.',
                 '{leader} still leads, {p2} refusing to drop away.',
-                '{last} at the back — but races can change in an instant on {track}.'
+                // Per spec v2.75: when the field is small (≤5 racers) the
+                // "at the back" framing reads oddly — there's nowhere to BE
+                // at the back of. Reference their position ordinal instead.
+                // For larger fields, "at the back" / "in last position" is
+                // fine. The {lastDesc} token resolves accordingly.
+                '{last} {lastDesc} — but races can change in an instant on {track}.'
             ]
         }
     };
@@ -1249,6 +1254,21 @@
             p2: state.racers[1] ? state.racers[1].name : '—',
             p3: state.racers[2] ? state.racers[2].name : '—',
             last: state.racers.length > 0 ? state.racers[state.racers.length - 1].name : '—',
+            // {lastDesc} — describes the last-place racer's position phrasing.
+            // Per spec v2.75:
+            //   field ≤5: use their ordinal position ("in 5th") — "at the
+            //             back" reads as filler when there are only a handful
+            //             of cars to be at the back of.
+            //   field >5: a random pick between "at the back" and "in last
+            //             position" — both read naturally in larger fields.
+            lastDesc: (function () {
+                const n = state.racers.length;
+                if (n === 0) return '';
+                if (n <= 5) {
+                    return 'in ' + ordinal(n);
+                }
+                return Math.random() < 0.5 ? 'at the back' : 'in last position';
+            })(),
             total: String(state.racerCount || state.racers.length || '?'),
             countdown: scrapeCountdown() || 'a few moments',
             // {trackDesc} comes from the Torn v2 API /racing/tracks endpoint
@@ -1582,7 +1602,14 @@
 
         if (st === S.PRE_LAUNCH && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
             if (now >= tAmbient) {
-                pushLine(fill(pickLine(LINES.PRE_LAUNCH.ambient, 'ambient')), 'ambient');
+                // Per spec v2.75: track-description-flavoured messages can
+                // appear during PRE_LAUNCH as well as RACING/COUNTDOWN.
+                // Route through ambientPoolFor() so the characteristic-derived
+                // pool (mud/tarmac/docks/etc.) gets merged in alongside the
+                // base PRE_LAUNCH ambient lines.
+                const picked = pickLine(ambientPoolFor(LINES.PRE_LAUNCH), 'ambient');
+                if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
+                pushLine(fill(picked), 'ambient');
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
                 state.preLaunchMsgCount++;
             } else if (now >= tPlayer && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
