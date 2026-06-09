@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.81.0
+// @version      2.83.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.81.0';
+    const SCRIPT_VERSION = '2.83.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -321,6 +321,34 @@
             // last on track and all other racers have finished. Switches the
             // commentary tone to "alone on the road". These templates do
             // NOT reference other racers (because there are none left).
+            // Per spec v2.83: start-of-race lines fired in the first few
+            // seconds after RACING begins. Cover launch types (clean, slow,
+            // wheelspin), nudges in the pack, and player-focused starts.
+            // These reference the grid/launch — never mid-race action like
+            // "halfway through" or "down the long straight" — because the
+            // race has only just got underway.
+            startGrid: [
+                'Lightning start from {leader}! Straight into the lead.',
+                'Clean getaway for {leader} — holding position into turn one.',
+                '{leader} bogs down on the launch! {p2} sneaks past.',
+                'Wheelspin from {leader}! That\u2019s a tenth or two lost already.',
+                '{p2} times the launch perfectly — instant move on {leader}.',
+                'Bad start for {p2} — hesitates at the line.',
+                'Nudges and bumps in the pack as the cars get away.',
+                'Drama in the midfield! Smoke at the back of the grid.',
+                'Side-by-side launches all down the front row.',
+                'The whole pack jumps as one — heads straight for the first corner.',
+                'A slow start for some of the back-row cars. Lots to recover.',
+                '{leader} gets the jump and everyone is left chasing.',
+                '{player} times the launch nicely in the {car}.',
+                '{player} struggles off the line — slow start in the {car}.',
+                'Off they go! Engines screaming as the field gets up to speed.',
+                'Clean start across the field. No drama on the launch.',
+                'Carnage at the start! Cars all over the place.',
+                'A bit of a fumble for {p3} on the launch — slipping back.',
+                '{p2} just edges {leader} off the line! What a getaway.',
+                'Everyone away cleanly. Now the racing begins.'
+            ],
             lonelyFinish: [
                 'Just {player} now — everyone else home and showered.',
                 'A long lonely road to the line for {player}.',
@@ -680,7 +708,14 @@
         // 'up'   = newest at top, older scroll down off the bottom (default per spec)
         scrollDirection: 'up',
         halfwayFired: false,
-        preLaunchMsgCount: 0
+        preLaunchMsgCount: 0,
+        // Per spec v2.83: track when RACING first activated so the start-
+        // grid commentary pool fires only for the first few seconds. Both
+        // session-only — race-entry reset clears them. We don't persist
+        // these because a page refresh during a race shouldn't replay the
+        // start-grid lines (we're already underway).
+        raceStartedAt: 0,
+        startGridLinesFired: 0
     };
 
     // commentaryPaused — session only, never persisted. Manual via the Pause button.
@@ -1731,12 +1766,32 @@
         const haveDesc = !!getCurrentTrackDescription();
         // For records-driven gap tokens we also need at least one lap recorded.
         const haveLaps = state.lapTimesSec && state.lapTimesSec.length > 0;
+        // Per spec v2.83: once finishers thin out the field, racer-slot
+        // tokens ({leader}, {p2}, {p3}, {last}) can resolve to em-dash
+        // because state.racers no longer has enough entries. Filter such
+        // templates out instead of letting them render "{leader} leads from
+        // — and —. Every lap a new story." which reads broken.
+        const racerCount = state.racers ? state.racers.length : 0;
         return pool.filter(function (tpl) {
             if (typeof tpl !== 'string') return false;
             if (/\{recordGap\}/.test(tpl) && !(haveRecord && haveLaps)) return false;
             if (/\{recordTime\}|\{recordHolder\}|\{recordCar\}/.test(tpl) && !haveRecord) return false;
             if (/\{carStrength\}|\{carWeakness\}|\{raceRecord\}/.test(tpl) && !haveCar) return false;
             if (/\{trackDesc\}/.test(tpl) && !haveDesc) return false;
+            // Racer-slot guards. {leader} needs at least 1 racer, {p2}
+            // needs 2, {p3} needs 3. {last} needs at least 1 (and is
+            // meaningfully different from {leader} only when 2+ racers
+            // are present). All these tokens resolve via state.racers,
+            // which is filtered by excludeCrashed() — so racerCount here
+            // is the live count of still-racing drivers, exactly what we
+            // want for the no-em-dash check.
+            if (/\{p3\}/.test(tpl) && racerCount < 3) return false;
+            if (/\{p2\}/.test(tpl) && racerCount < 2) return false;
+            if (/\{leader\}/.test(tpl) && racerCount < 1) return false;
+            // {last} is only meaningful as a distinct concept when there
+            // are at least 2 racers — otherwise {last} === {leader} and
+            // the line reads like a tautology.
+            if (/\{last\}/.test(tpl) && racerCount < 2) return false;
             return true;
         });
     }
@@ -2076,7 +2131,36 @@
                     const k = priority[i];
                     if (attrs[k] && attrs[k].level === 'high') return phrases[k];
                 }
-                return '';
+                // Per spec v2.82 BUG FIX: empty {carStrength} produced
+                // "The {car} setup is . {player} ready to make it count."
+                // because templates assume the token always renders a
+                // complete phrase. For class D/E cars (and modest B/C
+                // cars) no attribute reaches "high" on the class-scaled
+                // threshold — return empty would break the template.
+                // Fall back through MEDIUM-classified attributes first,
+                // then the single highest raw value, then a generic
+                // phrase. Token always renders non-empty when car data
+                // exists.
+                for (let i = 0; i < priority.length; i++) {
+                    const k = priority[i];
+                    if (attrs[k] && attrs[k].level === 'medium') return phrases[k];
+                }
+                // Final fallback: pick the highest raw value across the
+                // attributes we have phrases for. This catches the all-low
+                // class-E case (e.g. Skids with all stats 5-15).
+                let bestKey = null, bestValue = -1;
+                const phraseKeys = Object.keys(phrases);
+                for (let i = 0; i < phraseKeys.length; i++) {
+                    const k = phraseKeys[i];
+                    if (attrs[k] && typeof attrs[k].value === 'number' && attrs[k].value > bestValue) {
+                        bestValue = attrs[k].value;
+                        bestKey = k;
+                    }
+                }
+                if (bestKey) return phrases[bestKey];
+                // Truly nothing — generic positive phrase so the sentence
+                // still parses cleanly.
+                return 'running well';
             })(),
             // {carWeakness}: opposite of {carStrength} — surfaces a "low"
             // attribute the current track would punish. Empty when no car
@@ -2415,9 +2499,24 @@
             // the existing finisher tracking: if every non-player non-crashed
             // racer is in knownFinishers, we're alone.
             const lonely = isPlayerAloneOnTrack();
+            // Per spec v2.83: in the first ~15 seconds of RACING, prefer
+            // the startGrid pool over normal ambient. Cap at 2 lines fired
+            // so we don't flood the feed with start chatter — by then the
+            // race is properly underway. Skip entirely when restored into
+            // RACING from a refresh (raceStartedAt stays 0 in that case).
+            const inStartWindow = state.raceStartedAt > 0
+                && (Date.now() - state.raceStartedAt) < 15000
+                && state.startGridLinesFired < 2;
             if (now >= tAmbient) {
                 if (lonely) {
                     pushLine(fill(pickLine(LINES.RACING.lonelyFinish, 'lonely')), 'ambient');
+                } else if (inStartWindow) {
+                    pushLine(fill(pickLine(LINES.RACING.startGrid, 'startGrid')), 'ambient');
+                    state.startGridLinesFired++;
+                    // Tighter cadence during the start window so the two
+                    // launch lines land within the first 10s of racing.
+                    tAmbient = now + 4500 + Math.random() * 2000;
+                    return;
                 } else {
                     const picked = pickLine(ambientPoolFor(LINES.RACING), 'ambient');
                     if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
@@ -2450,17 +2549,50 @@
             // means nothing to move past or alongside.
             if (!lonely) detectMovement();
             if (now >= tProximity && state.racers.length >= 2 && !lonely) {
-                const idx = Math.floor(Math.random() * (state.racers.length - 1));
-                const r1 = state.racers[idx];
-                const r2 = state.racers[idx + 1];
-                if (r1 && r2) {
-                    if (bigRaceShouldShow()) {
-                        pushLine(
-                            fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: r1.name, p2name: r2.name }),
-                            'position', ICON.proximity
-                        );
+                // Per spec v2.82: proximity commentary should fire when the
+                // actual completion gap between adjacent racers is within
+                // 0.1%. We compute this from per-racer % completions scraped
+                // from the DOM. When completion data isn't available (older
+                // Torn UI variant or scrape failure), fall back to the
+                // legacy random-leaderboard-adjacent pick so the feature
+                // still produces lines, just without the gap guarantee.
+                const completions = scrapeRacerCompletions();
+                const haveCompletions = Object.keys(completions).length >= 2;
+                let p1 = null, p2 = null;
+                if (haveCompletions) {
+                    // Strict mode: only fire when gap < 0.1%.
+                    const closePair = findClosestPair(state.racers, completions, 0.1);
+                    if (closePair) {
+                        // Cooldown per pair so a sustained 0.1% battle
+                        // doesn't refire every poll.
+                        const key = proximityPairKey(closePair.front.name, closePair.back.name);
+                        const last = recentProximityPairs[key] || 0;
+                        if (now - last >= PROXIMITY_PAIR_COOLDOWN_MS) {
+                            p1 = closePair.front;
+                            p2 = closePair.back;
+                            recentProximityPairs[key] = now;
+                        }
                     }
+                } else {
+                    // Legacy fallback: random adjacent leaderboard pair.
+                    const idx = Math.floor(Math.random() * (state.racers.length - 1));
+                    p1 = state.racers[idx];
+                    p2 = state.racers[idx + 1];
+                }
+                if (p1 && p2 && bigRaceShouldShow()) {
+                    pushLine(
+                        fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: p1.name, p2name: p2.name }),
+                        'position', ICON.proximity
+                    );
+                }
+                // Advance the cadence whether or not we fired. When we did
+                // fire, use the full gap to space lines out. When we didn't
+                // (no close pair OR cooldown), re-check sooner since the
+                // race state can change quickly.
+                if (p1 && p2) {
                     tProximity = now + PROXIMITY_GAP + Math.random() * 8000;
+                } else {
+                    tProximity = now + 4000;
                 }
             }
             if (now >= tFunny && state.racers.length > 0) {
@@ -2640,6 +2772,127 @@
         });
     }
 
+    // Per spec v2.82: scrape per-racer completion percentage from the
+    // leaderboard rows so we can compute true proximity (gap in %) between
+    // adjacent racers rather than just leaderboard-position adjacency.
+    //
+    // Torn's UI shows each racer's progress somewhere on their driver-item
+    // row, but the exact selector has shifted across versions. We try
+    // several strategies in order of specificity, returning the first one
+    // that produces a sensible percentage. When nothing matches, the
+    // returned object is empty and the caller falls back to the legacy
+    // leaderboard-adjacent picking.
+    //
+    // Returns { [name]: pct } where pct is in [0, 100].
+    function scrapeRacerCompletions () {
+        const result = {};
+        const rows = document.querySelectorAll(
+            'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"]'
+        );
+        if (!rows || !rows.length) return result;
+        rows.forEach(function (row) {
+            if (isInsideTornMenu(row)) return;
+            if (looksLikeEventsRow(row)) return;
+            const nameEl = row.querySelector('li.name > span, li.name, li[class*="name"] > span, li[class*="name"]');
+            if (!nameEl) return;
+            const name = (nameEl.textContent || '').trim();
+            if (!name || name.length < 2 || name.length > 40) return;
+
+            let pct = null;
+
+            // Strategy 1: dedicated completion/progress element with text.
+            const compEl = row.querySelector(
+                'li.completion, li[class*="completion"], li.percent, li[class*="percent"], ' +
+                'li.progress, li[class*="progress"]'
+            );
+            if (compEl) {
+                const m = (compEl.textContent || '').match(/(\d+(?:\.\d+)?)\s*%?/);
+                if (m) {
+                    const v = parseFloat(m[1]);
+                    if (!isNaN(v) && v >= 0 && v <= 100) pct = v;
+                }
+            }
+
+            // Strategy 2: progress bar inline-style width (Torn often
+            // renders progress as a div with style="width: 73.45%").
+            if (pct === null) {
+                const barEls = row.querySelectorAll('[style*="width"]');
+                for (let i = 0; i < barEls.length; i++) {
+                    const style = barEls[i].getAttribute('style') || '';
+                    const m = style.match(/width:\s*(\d+(?:\.\d+)?)\s*%/);
+                    if (m) {
+                        const v = parseFloat(m[1]);
+                        // Skip 100% width fillers (full-width containers).
+                        // Also skip very small values that are probably
+                        // decorative bars rather than progress.
+                        if (!isNaN(v) && v > 0 && v < 100) { pct = v; break; }
+                    }
+                }
+            }
+
+            // Strategy 3: data-completion / data-progress / data-percent
+            // attributes anywhere in the row.
+            if (pct === null) {
+                const dataEl = row.querySelector('[data-completion], [data-progress], [data-percent]');
+                if (dataEl) {
+                    const raw = dataEl.getAttribute('data-completion')
+                        || dataEl.getAttribute('data-progress')
+                        || dataEl.getAttribute('data-percent');
+                    const v = parseFloat(raw);
+                    if (!isNaN(v) && v >= 0 && v <= 100) pct = v;
+                }
+            }
+
+            if (pct !== null) result[name] = pct;
+        });
+        return result;
+    }
+
+    // Per spec v2.82: from a set of racers and their completion %s, find
+    // the adjacent pair (by completion order, front-to-back) with the
+    // smallest gap and return it if the gap is within the threshold.
+    // Returns { front, back, gap } or null if no pair qualifies.
+    //
+    // Racers are expected to come from state.racers (the leaderboard scrape)
+    // and the result is filtered by what's actually present in `completions`.
+    // Crashed and finished racers should have been filtered out of state.racers
+    // by excludeCrashed() before calling this — but we belt-and-brace via
+    // the completion map (anyone not in `completions` is silently skipped).
+    function findClosestPair (racers, completions, thresholdPct) {
+        if (!racers || racers.length < 2) return null;
+        if (!completions || Object.keys(completions).length < 2) return null;
+        // Build a sorted list (descending completion = front-to-back of race).
+        const ranked = [];
+        for (let i = 0; i < racers.length; i++) {
+            const r = racers[i];
+            if (!r || !r.name) continue;
+            const c = completions[r.name];
+            if (typeof c !== 'number') continue;
+            ranked.push({ r: r, c: c });
+        }
+        if (ranked.length < 2) return null;
+        ranked.sort(function (a, b) { return b.c - a.c; });
+        let best = null;
+        for (let i = 0; i < ranked.length - 1; i++) {
+            const gap = ranked[i].c - ranked[i + 1].c;
+            if (gap >= thresholdPct) continue;
+            if (!best || gap < best.gap) {
+                best = { front: ranked[i].r, back: ranked[i + 1].r, gap: gap };
+            }
+        }
+        return best;
+    }
+
+    // Per-pair cooldown tracking for proximity announcements. Without this
+    // a sustained close battle (which can last many seconds at 0.1% gap)
+    // would refire the same line every poll. Keyed by sorted name pair.
+    // Session-only — fine for the use case.
+    let recentProximityPairs = {};
+    const PROXIMITY_PAIR_COOLDOWN_MS = 25000;
+    function proximityPairKey (a, b) {
+        return [a, b].sort().join('|');
+    }
+
     // Per spec v2.80: detect other racers crossing the finish line from the
     // DOM. The previous logic only added the PLAYER to knownFinishers when
     // ENDED status fired, which meant the lonely-finish branch (added in
@@ -2768,6 +3021,16 @@
                 otherCrashedNames.clear();
                 // Reset throttle gate timestamp for the new race.
                 throttleNextAllowedAt = 0;
+                // Per spec v2.82: proximity pair cooldowns are race-scoped.
+                // Clearing on race entry stops a battle from race N still
+                // suppressing the same name-pair if it recurs in race N+1.
+                recentProximityPairs = {};
+                // Per spec v2.83: re-arm the start-grid window on race
+                // entry. raceStartedAt gets stamped when status actually
+                // hits RACING; here we just ensure stale values from a
+                // previous race don't leak in.
+                state.raceStartedAt = 0;
+                state.startGridLinesFired = 0;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -2838,6 +3101,14 @@
             if (!restoredIntoRacing) {
                 const tn = state.track !== '—' ? state.track : 'this circuit';
                 pushLine("It's a green light — we are go on " + tn + "!", 'status', ICON.flag);
+                // Per spec v2.83: arm the start-grid window. ambient
+                // dispatch will draw from LINES.RACING.startGrid for the
+                // next few seconds, then revert to normal RACING ambient.
+                // restoredIntoRacing skip means a mid-race page refresh
+                // won't trigger start-grid lines — the race is already
+                // underway and start commentary would read wrong.
+                state.raceStartedAt = Date.now();
+                state.startGridLinesFired = 0;
             }
         }
         if (newSt === S.RACE_REPLAY && oldSt !== S.RACE_REPLAY) {
