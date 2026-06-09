@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.83.0
+// @version      2.84.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.83.0';
+    const SCRIPT_VERSION = '2.84.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -2556,6 +2556,27 @@
                 // Torn UI variant or scrape failure), fall back to the
                 // legacy random-leaderboard-adjacent pick so the feature
                 // still produces lines, just without the gap guarantee.
+                //
+                // Per spec v2.84 MESSAGES INVOLVING TWO PLAYERS: the
+                // convention for the two-player tokens is:
+                //   {p1name} = the racer BEHIND (chaser, attacker)
+                //   {p2name} = the racer AHEAD  (defender, leader of pair)
+                // This is what makes directional templates read correctly:
+                //   "{p1} right on the bumper of {p2}"        — chaser on
+                //                                                 defender's
+                //                                                 bumper ✓
+                //   "{p1} bumps their fender, {p2} brake checks" — chaser
+                //                                                 bumps,
+                //                                                 defender
+                //                                                 brake-
+                //                                                 checks ✓
+                //   "{p1} tries the move on {p2}"             — chaser
+                //                                                 overtakes
+                //                                                 defender ✓
+                // Symmetric templates (side by side, wheel to wheel, locked
+                // in a duel) read the same with either assignment, so the
+                // convention is purely about getting the directional ones
+                // right.
                 const completions = scrapeRacerCompletions();
                 const haveCompletions = Object.keys(completions).length >= 2;
                 let p1 = null, p2 = null;
@@ -2568,16 +2589,21 @@
                         const key = proximityPairKey(closePair.front.name, closePair.back.name);
                         const last = recentProximityPairs[key] || 0;
                         if (now - last >= PROXIMITY_PAIR_COOLDOWN_MS) {
-                            p1 = closePair.front;
-                            p2 = closePair.back;
+                            // p1 = chaser (back), p2 = defender (front).
+                            p1 = closePair.back;
+                            p2 = closePair.front;
                             recentProximityPairs[key] = now;
                         }
                     }
                 } else {
                     // Legacy fallback: random adjacent leaderboard pair.
+                    // state.racers is leaderboard-ordered (pos 1, 2, 3...)
+                    // so racers[idx] is AHEAD of racers[idx+1]. Map to the
+                    // chaser/defender convention by assigning the higher-
+                    // indexed (further-back) racer to p1.
                     const idx = Math.floor(Math.random() * (state.racers.length - 1));
-                    p1 = state.racers[idx];
-                    p2 = state.racers[idx + 1];
+                    p1 = state.racers[idx + 1];
+                    p2 = state.racers[idx];
                 }
                 if (p1 && p2 && bigRaceShouldShow()) {
                     pushLine(
