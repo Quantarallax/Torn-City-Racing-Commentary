@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.77.0
+// @version      2.78.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.77.0';
+    const SCRIPT_VERSION = '2.78.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -37,7 +37,7 @@
     const POSITION_COOLDOWN = 4000;
     const PRE_LAUNCH_MAX = 3;
 
-    const STORAGE_KEY = 'tc_racecomm_v85';
+    const STORAGE_KEY = 'tc_racecomm_v86';
 
     // Words we know are page UI labels, never real Torn usernames. If the
     // name regex matches one of these, the scrape is faulty (e.g. text like
@@ -62,9 +62,31 @@
     const API_KEY_STORAGE = 'tc_racecomm_api_key';
     const TRACKS_CACHE_STORAGE = 'tc_racecomm_tracks_cache';
     const TRACKS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week — track data rarely changes
+    // Per spec v2.78: track records and player enlisted cars APIs.
+    // Records are per-track-per-class lap times — refresh once per session
+    // is fine (they only change when someone sets a new record). Cars are
+    // per-player attributes — refresh a few times per hour at most so we
+    // pick up post-tune-up changes without hammering the API.
+    const RECORDS_CACHE_STORAGE = 'tc_racecomm_records_cache';
+    const RECORDS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+    const CARS_CACHE_STORAGE = 'tc_racecomm_cars_cache';
+    const CARS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
     // tracksCache schema: { fetchedAt: <epoch ms>, tracks: [{title, description, ...}] }
     let tracksCache = null;
     let tracksFetchInFlight = false;
+    // recordsCache schema: { fetchedAt, byKey: { '<trackId>-<class>': {records:[...]} } }
+    let recordsCache = null;
+    let recordsFetchInFlight = {};
+    // carsCache schema: { fetchedAt, cars: [...] }. enlistedcars endpoint
+    // returns ALL of the user's cars; we filter by current car_item_name at
+    // lookup time. If multiple cars match (e.g. two Edomondo NSXs) we pick
+    // one at random per spec v2.78.
+    let carsCache = null;
+    let carsFetchInFlight = false;
+    // keyAccessFlags schema: { tracksOK, recordsOK, carsOK } — set after the
+    // first request of each type returns. Helps the settings page describe
+    // what's actually working with the current key (vs what we'd expect).
+    let keyAccessFlags = { tracksOK: false, recordsOK: false, carsOK: false };
 
     // ─── SVG Icons ───────────────────────────────────────────────────────────────
     const ICON = {
@@ -139,6 +161,38 @@
     // check so the two statuses stay in sync.
     function isRacingLike (st) {
         return st === S.RACING || st === S.RACE_REPLAY;
+    }
+
+    // Per spec v2.78: detect when the player is the only racer still on
+    // track — every other non-crashed racer has crossed the finish line.
+    // The spec also says "Do not include drivers ahead of the player if
+    // they finish the race"; this helper is the trigger for both that
+    // suppression and the dedicated lonely-finish commentary pool.
+    //
+    // Logic: count racers who are neither the player nor known to have
+    // crashed nor known to have finished. If that count is zero AND there
+    // are non-player finishers, the player is alone. The "non-player
+    // finishers" check guards against firing this state at the very start
+    // of a race when no-one has crossed yet.
+    function isPlayerAloneOnTrack () {
+        if (!state.racers || !state.racers.length) return false;
+        if (!knownFinishers || knownFinishers.size === 0) return false;
+        const pname = state.playerName;
+        if (!pname) return false;
+        // Count non-player non-crashed non-finished racers.
+        let stillRacing = 0;
+        let nonPlayerFinishers = 0;
+        for (let i = 0; i < state.racers.length; i++) {
+            const r = state.racers[i];
+            if (!r || !r.name) continue;
+            if (r.name === pname) continue;
+            if (otherCrashedNames && otherCrashedNames.has(r.name)) continue;
+            if (knownFinishers.has(r.name)) { nonPlayerFinishers++; continue; }
+            stillRacing++;
+        }
+        // Player is alone if no other non-player racer is still circulating
+        // AND at least one non-player finisher has been recorded.
+        return stillRacing === 0 && nonPlayerFinishers > 0;
     }
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
@@ -239,7 +293,45 @@
                 'Every lap matters at this stage. No room for error.',
                 "It's crazy today!",
                 'Looking forwards to how this race goes.',
-                'The crowd pushes forward, onto the track while the cars blast past.'
+                'The crowd pushes forward, onto the track while the cars blast past.',
+                // Per spec v2.78: car-attribute-aware ambient. {carStrength}
+                // and {carWeakness} resolve to flavour phrases based on the
+                // player's enlisted car attributes vs the current track
+                // demands. Templates with these tokens are auto-filtered
+                // out of the pool when no minimal-key data is available.
+                "{player}'s {car} is {carStrength}. Could pay dividends today.",
+                "Watch the {car} — {carStrength}. A real weapon on a track like this.",
+                "The {car} setup is {carStrength}. {player} ready to make it count.",
+                "It's not just one upgrade that wins races — but {player}'s car is {carStrength}.",
+                "{player} carrying {raceRecord} into this one. Form mattering.",
+                "{player} could be a problem out there — {raceRecord} in this {car}.",
+                "The {car} has {carWeakness}. Could hurt {player} today.",
+                "Concerns over the {car} — {carWeakness} on a track like this.",
+                "{carWeakness} for {player}'s {car}. Watch for time loss in the wrong sections.",
+                // Per spec v2.78: record-aware ambient. {recordTime},
+                // {recordHolder}, {recordCar} resolve to top-class records
+                // fetched from /v2/racing/{id}/records. Filtered out when
+                // no records cached.
+                'Track record here is {recordTime}, set by {recordHolder} in a {recordCar}.',
+                'Anyone wanting to threaten the {recordTime} class record by {recordHolder} has work to do.',
+                'The bar is {recordHolder}\u2019s {recordTime} — set in a {recordCar}.',
+                'A reminder: class record on {track} sits at {recordTime}.'
+            ],
+            // Per spec v2.78: lonely-finish lines, used when the player is
+            // last on track and all other racers have finished. Switches the
+            // commentary tone to "alone on the road". These templates do
+            // NOT reference other racers (because there are none left).
+            lonelyFinish: [
+                'Just {player} now — everyone else home and showered.',
+                'A long lonely road to the line for {player}.',
+                '{player} the only car still circulating. Just have to bring it home.',
+                'The crowd is starting to drift away. {player} still out there grinding.',
+                'Nothing for company but the engine noise. {player} laps to the finish.',
+                'A processional finish for {player}. Just complete the laps and pick up the points.',
+                'No mirrors needed — {player} is the last one on track.',
+                'The chequered flag is ready and waiting. {player} just needs to get there.',
+                'No traffic, no overtakes — just {player} and the road.',
+                '{player} working alone now. Smooth and consistent will do the job.'
             ],
             // API-flavoured RACING ambient — uses {trackDesc} from the Torn
             // tracks endpoint, merged into the active pool only when the
@@ -353,7 +445,15 @@
                 "Pace stepping up — {player} {delta}s quicker, lap {lapNum} in {lapTime}.",
                 "{player} finds another {delta}s. Lap {lapNum} clocked at {lapTime}.",
                 "Sharper through the turns — {lapTime} for {player}, {delta}s faster on lap {lapNum}.",
-                "{player} putting the hammer down: {lapTime}, {delta}s up on the last one."
+                "{player} putting the hammer down: {lapTime}, {delta}s up on the last one.",
+                // Per spec v2.78: record-aware variants. {recordGap} resolves
+                // to phrases like "only 1.2 seconds off the track record" or
+                // "a new track record". When no record cached, {recordGap}
+                // renders empty — these templates fall through to other pools
+                // via the pickLine recent-blocklist on empty render.
+                "{player} {delta}s up on the last one — {recordGap}.",
+                "Lap {lapNum} in {lapTime} for {player}, {recordGap}.",
+                "{lapTime} that time — {player} {recordGap}!"
             ],
             lapTimeSlower: [
                 "{player} loses {delta}s that lap — {lapTime} for lap {lapNum}.",
@@ -764,6 +864,7 @@
                         const list = (json.tracks && Array.isArray(json.tracks)) ? json.tracks : [];
                         if (list.length) {
                             saveTracksCache(list);
+                            keyAccessFlags.tracksOK = true;
                         }
                     } catch (e) {
                         console.warn('[TC Race Commentary] tracks API parse:', e);
@@ -780,6 +881,252 @@
             tracksFetchInFlight = false;
             console.warn('[TC Race Commentary] tracks API request failed:', e);
         }
+    }
+
+    // ─── Track records cache (per spec v2.78) ────────────────────────────────
+    // Records are keyed by '<trackId>-<class>' so we can hold records for
+    // multiple tracks simultaneously (useful when player switches between
+    // races within one session). TTL of 6 hours — records rarely change.
+
+    function loadRecordsCache () {
+        try {
+            const raw = GM_getValue(RECORDS_CACHE_STORAGE, '');
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.fetchedAt || !parsed.byKey) return null;
+            if ((Date.now() - parsed.fetchedAt) > RECORDS_CACHE_TTL_MS) return null;
+            return parsed;
+        } catch (_) { return null; }
+    }
+
+    function saveRecordsCache () {
+        try {
+            if (!recordsCache) return;
+            GM_setValue(RECORDS_CACHE_STORAGE, JSON.stringify(recordsCache));
+        } catch (_) {}
+    }
+
+    // Fetch records for a specific (trackId, class) combination. Idempotent:
+    // if a fetch is already in flight for that key we don't fire another.
+    // Records endpoint is public — works with public OR minimal key.
+    function fetchTrackRecords (trackId, carClass) {
+        if (!trackId || !carClass) return;
+        const cacheKey = trackId + '-' + carClass;
+        if (recordsFetchInFlight[cacheKey]) return;
+        if (!recordsCache) recordsCache = loadRecordsCache() || { fetchedAt: Date.now(), byKey: {} };
+        // Already have it (and not expired) — skip.
+        if (recordsCache.byKey[cacheKey]) return;
+        const key = getApiKey();
+        if (!key) return;
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+        recordsFetchInFlight[cacheKey] = true;
+        try {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://api.torn.com/v2/racing/' + encodeURIComponent(trackId)
+                    + '/records?cat=' + encodeURIComponent(carClass)
+                    + '&key=' + encodeURIComponent(key),
+                timeout: 15000,
+                onload: function (resp) {
+                    recordsFetchInFlight[cacheKey] = false;
+                    try {
+                        if (resp.status !== 200) {
+                            console.warn('[TC Race Commentary] records API non-200:', resp.status);
+                            return;
+                        }
+                        const json = JSON.parse(resp.responseText || '{}');
+                        if (json.error) {
+                            console.warn('[TC Race Commentary] records API error:', json.error);
+                            return;
+                        }
+                        if (Array.isArray(json.records)) {
+                            recordsCache.byKey[cacheKey] = { records: json.records };
+                            recordsCache.fetchedAt = Date.now();
+                            saveRecordsCache();
+                            keyAccessFlags.recordsOK = true;
+                        }
+                    } catch (e) {
+                        console.warn('[TC Race Commentary] records API parse:', e);
+                    }
+                },
+                onerror: function () { recordsFetchInFlight[cacheKey] = false; },
+                ontimeout: function () { recordsFetchInFlight[cacheKey] = false; }
+            });
+        } catch (e) {
+            recordsFetchInFlight[cacheKey] = false;
+        }
+    }
+
+    // Look up the cached top record (lowest lap_time) for the current track
+    // and player car class. Returns { lap_time, driver_name, car_item_name }
+    // or null if not available. Triggers a background fetch on miss.
+    function getTopTrackRecord () {
+        const info = getTrackInfo(state.track);
+        if (!info || typeof info.id === 'undefined') return null;
+        const carClass = getPlayerCarClass();
+        if (!carClass) return null;
+        if (!recordsCache) recordsCache = loadRecordsCache();
+        const cacheKey = info.id + '-' + carClass;
+        if (!recordsCache || !recordsCache.byKey[cacheKey]) {
+            fetchTrackRecords(info.id, carClass);
+            return null;
+        }
+        const recs = recordsCache.byKey[cacheKey].records;
+        if (!recs || !recs.length) return null;
+        // The API returns records sorted ascending by lap_time, but don't
+        // rely on that — find the min explicitly.
+        let best = recs[0];
+        for (let i = 1; i < recs.length; i++) {
+            if (recs[i].lap_time < best.lap_time) best = recs[i];
+        }
+        return best;
+    }
+
+    // ─── Enlisted cars cache (per spec v2.78) ────────────────────────────────
+    // Player's enlisted cars from /v2/user/enlistedcars. Requires minimal key
+    // (user data). On fetch we store all cars and pick the matching one at
+    // lookup time, since the player may switch cars mid-session.
+
+    function loadCarsCache () {
+        try {
+            const raw = GM_getValue(CARS_CACHE_STORAGE, '');
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.fetchedAt || !Array.isArray(parsed.cars)) return null;
+            if ((Date.now() - parsed.fetchedAt) > CARS_CACHE_TTL_MS) return null;
+            return parsed;
+        } catch (_) { return null; }
+    }
+
+    function saveCarsCache (cars) {
+        try {
+            const payload = { fetchedAt: Date.now(), cars: cars };
+            GM_setValue(CARS_CACHE_STORAGE, JSON.stringify(payload));
+            carsCache = payload;
+        } catch (_) {}
+    }
+
+    function fetchEnlistedCars () {
+        if (carsFetchInFlight) return;
+        const key = getApiKey();
+        if (!key) return;
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+        carsFetchInFlight = true;
+        try {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://api.torn.com/v2/user/enlistedcars?key=' + encodeURIComponent(key),
+                timeout: 15000,
+                onload: function (resp) {
+                    carsFetchInFlight = false;
+                    try {
+                        if (resp.status !== 200) {
+                            console.warn('[TC Race Commentary] enlistedcars API non-200:', resp.status);
+                            return;
+                        }
+                        const json = JSON.parse(resp.responseText || '{}');
+                        if (json.error) {
+                            // Public-key holders will hit a permission error
+                            // here — that's expected, not a script bug.
+                            console.warn('[TC Race Commentary] enlistedcars API error:', json.error);
+                            return;
+                        }
+                        const list = Array.isArray(json.enlistedcars) ? json.enlistedcars : [];
+                        if (list.length) {
+                            saveCarsCache(list);
+                            keyAccessFlags.carsOK = true;
+                        }
+                    } catch (e) {
+                        console.warn('[TC Race Commentary] enlistedcars API parse:', e);
+                    }
+                },
+                onerror: function () { carsFetchInFlight = false; },
+                ontimeout: function () { carsFetchInFlight = false; }
+            });
+        } catch (e) {
+            carsFetchInFlight = false;
+        }
+    }
+
+    // Find the enlisted-car record matching the player's currently selected
+    // car. Per spec v2.78: "If more than one car matches player's current
+    // car, pick a random entry out of the ones founds of the same car
+    // name." We resolve by car_item_name (the API name), comparing case-
+    // insensitively against the scraped state.car. Returns null when no
+    // cached cars data is available (no minimal key, or fetch failed).
+    function getPlayerCarData () {
+        if (!carsCache) carsCache = loadCarsCache();
+        if (!carsCache || !carsCache.cars) {
+            fetchEnlistedCars();
+            return null;
+        }
+        const cur = (state.car || '').trim().toLowerCase();
+        if (!cur || cur === '—') return null;
+        const matches = [];
+        for (let i = 0; i < carsCache.cars.length; i++) {
+            const c = carsCache.cars[i];
+            const nm = (c.car_item_name || '').trim().toLowerCase();
+            if (nm === cur) matches.push(c);
+        }
+        if (!matches.length) return null;
+        return matches[Math.floor(Math.random() * matches.length)];
+    }
+
+    // Player car class — used to drive both record-class lookup and the
+    // attribute classification scale. Returns 'A'..'E' or null. Falls back
+    // to 'A' if minimal-key data isn't available but we still want a
+    // reasonable default for record fetching (the records endpoint requires
+    // a class param to return anything useful).
+    function getPlayerCarClass () {
+        const data = getPlayerCarData();
+        if (data && typeof data.class === 'string') return data.class.toUpperCase();
+        // Best-effort fallback: class A. Public-key users won't have car
+        // data but should still see Class A records on Class A tracks.
+        return 'A';
+    }
+
+    // Per spec v2.78: attribute classification on a class-scaled sliding
+    // scale. Class A: 0-50 Low / 51-100 Medium / 101-150 High. Lower classes
+    // scale down such that 50 is "High" at Class E. Implemented as a single
+    // factor on the breakpoints.
+    //   A: factor 1.0  → breakpoints 50, 100   (max ~150)
+    //   B: factor 0.8  → breakpoints 40, 80    (max ~120)
+    //   C: factor 0.6  → breakpoints 30, 60    (max ~90)
+    //   D: factor 0.4  → breakpoints 20, 40    (max ~60)
+    //   E: factor 0.33 → breakpoints 17, 33    (max ~50)
+    function classifyAttr (value, carClass) {
+        if (typeof value !== 'number') return 'unknown';
+        const factor = { A: 1.0, B: 0.8, C: 0.6, D: 0.4, E: 0.33 }[carClass] || 1.0;
+        const lowMax = 50 * factor;
+        const mediumMax = 100 * factor;
+        if (value <= lowMax) return 'low';
+        if (value <= mediumMax) return 'medium';
+        return 'high';
+    }
+
+    // Return a structured snapshot of the player's car attributes with each
+    // one classified (low/medium/high). Used by the commentary engine to
+    // shape flavour lines that reference whether the car is strong/weak in
+    // areas the current track demands. Returns null when no car data
+    // available (no minimal key).
+    function getPlayerCarAttrs () {
+        const data = getPlayerCarData();
+        if (!data) return null;
+        const cls = (data.class || 'A').toUpperCase();
+        return {
+            name: data.car_item_name,
+            cls: cls,
+            top_speed: { value: data.top_speed, level: classifyAttr(data.top_speed, cls) },
+            acceleration: { value: data.acceleration, level: classifyAttr(data.acceleration, cls) },
+            braking: { value: data.braking, level: classifyAttr(data.braking, cls) },
+            handling: { value: data.handling, level: classifyAttr(data.handling, cls) },
+            safety: { value: data.safety, level: classifyAttr(data.safety, cls) },
+            dirt: { value: data.dirt, level: classifyAttr(data.dirt, cls) },
+            tarmac: { value: data.tarmac, level: classifyAttr(data.tarmac, cls) },
+            worth: data.worth,
+            races_entered: data.races_entered,
+            races_won: data.races_won
+        };
     }
 
     // Return the cached track record matching the given title (case-insensitive,
@@ -1363,10 +1710,47 @@
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────
+    // Per spec v2.78: some tokens render empty when their backing data
+    // isn't available (no API key, fetch not yet completed, or no matching
+    // data). Templates that reference these tokens would produce broken
+    // output like "Lap 4 in 00:27 for Sanxion, ." when the token renders
+    // as the empty string. This helper drops such templates from the pool
+    // BEFORE pickLine selects, so the script degrades gracefully when API
+    // data is unavailable.
+    //
+    // Optional tokens with their availability check:
+    //   {recordGap}   — needs cached records AND a lap time recorded
+    //   {recordTime}, {recordHolder}, {recordCar} — need cached records
+    //   {carStrength}, {carWeakness} — need cached enlistedcars
+    //   {raceRecord}  — needs cached enlistedcars
+    //   {trackDesc}   — needs cached track descriptions
+    function filterAvailableTemplates (pool) {
+        if (!Array.isArray(pool) || !pool.length) return pool;
+        const haveRecord = !!getTopTrackRecord();
+        const haveCar = !!getPlayerCarAttrs();
+        const haveDesc = !!getCurrentTrackDescription();
+        // For records-driven gap tokens we also need at least one lap recorded.
+        const haveLaps = state.lapTimesSec && state.lapTimesSec.length > 0;
+        return pool.filter(function (tpl) {
+            if (typeof tpl !== 'string') return false;
+            if (/\{recordGap\}/.test(tpl) && !(haveRecord && haveLaps)) return false;
+            if (/\{recordTime\}|\{recordHolder\}|\{recordCar\}/.test(tpl) && !haveRecord) return false;
+            if (/\{carStrength\}|\{carWeakness\}|\{raceRecord\}/.test(tpl) && !haveCar) return false;
+            if (/\{trackDesc\}/.test(tpl) && !haveDesc) return false;
+            return true;
+        });
+    }
+
     function pickLine (pool, typeKey) {
+        const filtered = filterAvailableTemplates(pool);
+        // If filtering removed everything, fall back to the original pool —
+        // better to render with a missing token than to skip the message
+        // entirely. This shouldn't happen in practice because we only filter
+        // pools that mix gated and non-gated lines.
+        const effectivePool = filtered.length ? filtered : pool;
         const recent = recentByType[typeKey] || [];
-        const available = pool.filter(function (l) { return recent.indexOf(l) === -1; });
-        const source = available.length > 0 ? available : pool;
+        const available = effectivePool.filter(function (l) { return recent.indexOf(l) === -1; });
+        const source = available.length > 0 ? available : effectivePool;
         const chosen = source[Math.floor(Math.random() * source.length)];
         recentByType[typeKey] = recent.concat([chosen]).slice(-REPEAT_WINDOW);
         return chosen;
@@ -1610,6 +1994,119 @@
                 if (tags.hilly)          phrases.push('over the rise');
                 if (!phrases.length) phrases.push('through the field');
                 return phrases[Math.floor(Math.random() * phrases.length)];
+            })(),
+            // ─── Track record tokens (spec v2.78) ────────────────────────────
+            // {recordTime}, {recordHolder}, {recordCar}: top class record at
+            // current track. Empty strings when no records cached yet (or no
+            // key); templates that include these tokens should be in pools
+            // that get filtered out when the token would render empty.
+            recordTime: (function () {
+                const r = getTopTrackRecord();
+                return r ? formatSecondsAsLapTime(r.lap_time) : '';
+            })(),
+            recordHolder: (function () {
+                const r = getTopTrackRecord();
+                return r && r.driver_name ? r.driver_name : '';
+            })(),
+            recordCar: (function () {
+                const r = getTopTrackRecord();
+                return r && r.car_item_name ? r.car_item_name : '';
+            })(),
+            // {recordGap}: player's last lap vs the class record. Renders as
+            // a phrase like "Only 1.2 seconds off the track record" when
+            // close (within 5s), or longer-form descriptive text when further
+            // back. Empty when no last-lap or no record cached.
+            recordGap: (function () {
+                const r = getTopTrackRecord();
+                const arr = state.lapTimesSec;
+                if (!r || !arr.length) return '';
+                const lastLap = arr[arr.length - 1];
+                const gap = lastLap - r.lap_time;
+                if (gap < 0.05) {
+                    // Player BEAT the record (or matched it within rounding)
+                    return 'a new track record';
+                }
+                if (gap < 0.5) {
+                    return 'within a tenth of the track record';
+                }
+                if (gap < 2) {
+                    return 'only ' + gap.toFixed(1) + ' seconds off the track record';
+                }
+                if (gap < 5) {
+                    return gap.toFixed(1) + ' seconds off the record';
+                }
+                return Math.round(gap) + ' seconds off the all-time record';
+            })(),
+            // ─── Car-attribute tokens (spec v2.78) ───────────────────────────
+            // {carStrength}: a phrase describing the player's car's standout
+            // attribute (whichever is rated "high" first, in a priority that
+            // matches what the current track demands). Falls back to a
+            // generic phrase when no car data or no high attribute.
+            carStrength: (function () {
+                const attrs = getPlayerCarAttrs();
+                if (!attrs) return '';
+                const tags = getTrackCharacteristics();
+                // Build a priority list of attribute → phrase based on what
+                // the track demands. Iterate priorities and return the first
+                // attribute classified "high" at the player's car class.
+                const phrases = {
+                    top_speed: 'with serious top end',
+                    acceleration: 'with a strong launch out of slow corners',
+                    braking: 'with brakes that can do the work',
+                    handling: 'with handling to thread the eye of a needle',
+                    safety: 'with safety to spare',
+                    dirt: 'tuned right for the rough stuff',
+                    tarmac: 'set up for grippy tarmac'
+                };
+                const priority = [];
+                // Track-driven priority: list the attribute most relevant to
+                // current tags first.
+                if (tags.straights || tags.fast) priority.push('top_speed', 'acceleration');
+                if (tags.hairpins || tags.rightAngles || tags.sharpCorners) priority.push('braking', 'acceleration');
+                if (tags.twisty || tags.slalom || tags.handlingFocus) priority.push('handling');
+                if (tags.mud) priority.push('dirt');
+                if (tags.tarmac) priority.push('tarmac');
+                if (tags.brakingFocus) priority.push('braking');
+                // Always-fallback ordering at the end.
+                const fallback = ['handling', 'acceleration', 'top_speed', 'braking', 'tarmac', 'dirt', 'safety'];
+                for (let i = 0; i < fallback.length; i++) {
+                    if (priority.indexOf(fallback[i]) === -1) priority.push(fallback[i]);
+                }
+                for (let i = 0; i < priority.length; i++) {
+                    const k = priority[i];
+                    if (attrs[k] && attrs[k].level === 'high') return phrases[k];
+                }
+                return '';
+            })(),
+            // {carWeakness}: opposite of {carStrength} — surfaces a "low"
+            // attribute the current track would punish. Empty when no car
+            // data or no concerning low attribute.
+            carWeakness: (function () {
+                const attrs = getPlayerCarAttrs();
+                if (!attrs) return '';
+                const tags = getTrackCharacteristics();
+                const phrases = {
+                    top_speed: 'top speed limited',
+                    acceleration: 'sluggish on the throttle',
+                    braking: 'brakes a real concern',
+                    handling: 'handling not its strong suit',
+                    dirt: 'no setup for the rough stuff',
+                    tarmac: 'tarmac grip a worry'
+                };
+                // Which low attribute matters MOST on this track?
+                if (tags.mud && attrs.dirt && attrs.dirt.level === 'low') return phrases.dirt;
+                if (tags.tarmac && attrs.tarmac && attrs.tarmac.level === 'low') return phrases.tarmac;
+                if ((tags.straights || tags.fast) && attrs.top_speed && attrs.top_speed.level === 'low') return phrases.top_speed;
+                if ((tags.hairpins || tags.brakingFocus) && attrs.braking && attrs.braking.level === 'low') return phrases.braking;
+                if ((tags.twisty || tags.handlingFocus) && attrs.handling && attrs.handling.level === 'low') return phrases.handling;
+                if (tags.accelFocus && attrs.acceleration && attrs.acceleration.level === 'low') return phrases.acceleration;
+                return '';
+            })(),
+            // {raceRecord}: short "won X of Y" phrase. Empty when no data.
+            raceRecord: (function () {
+                const attrs = getPlayerCarAttrs();
+                if (!attrs || !attrs.races_entered) return '';
+                return attrs.races_won + ' wins from ' + attrs.races_entered + ' races';
             })()
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
@@ -1910,20 +2407,33 @@
         }
 
         if (isRacingLike(st)) {
+            // Per spec v2.78: "If the player is last and all other racers
+            // have finished, add commentary which reflects being alone on
+            // the track". When we detect this state, prefer the lonely-
+            // finish pool and suppress proximity/position/movement chatter
+            // (there's nobody to be near or to overtake). Detection uses
+            // the existing finisher tracking: if every non-player non-crashed
+            // racer is in knownFinishers, we're alone.
+            const lonely = isPlayerAloneOnTrack();
             if (now >= tAmbient) {
-                const picked = pickLine(ambientPoolFor(LINES.RACING), 'ambient');
-                if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
-                pushLine(fill(picked), 'ambient');
+                if (lonely) {
+                    pushLine(fill(pickLine(LINES.RACING.lonelyFinish, 'lonely')), 'ambient');
+                } else {
+                    const picked = pickLine(ambientPoolFor(LINES.RACING), 'ambient');
+                    if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
+                    pushLine(fill(picked), 'ambient');
+                }
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
             }
-            if (now >= tPlayer) {
+            if (now >= tPlayer && !lonely) {
                 if (bigRaceShouldShow(true)) {
                     pushLine(fill(pickLine(LINES.RACING.player, 'player')), 'player');
                 }
                 tPlayer = now + PLAYER_GAP + Math.random() * 8000;
             }
-            // Position calls — gated by cooldown; pool selection uses authoritative racerCount
-            if (now >= tPosition && now >= tPosCooldown && state.racers.length >= 2) {
+            // Position calls — gated by cooldown; pool selection uses authoritative racerCount.
+            // Suppressed when player is alone (no other racers left to reference).
+            if (now >= tPosition && now >= tPosCooldown && state.racers.length >= 2 && !lonely) {
                 if (bigRaceShouldShow()) {
                     if (isThreePlusRace()) {
                         // 3+ racers confirmed from Position: X/Y — safe to use position3 lines
@@ -1936,8 +2446,10 @@
                 }
                 tPosition = now + POSITION_GAP + Math.random() * 5000;
             }
-            detectMovement();
-            if (now >= tProximity && state.racers.length >= 2) {
+            // Movement and proximity also gated on !lonely — no other racers
+            // means nothing to move past or alongside.
+            if (!lonely) detectMovement();
+            if (now >= tProximity && state.racers.length >= 2 && !lonely) {
                 const idx = Math.floor(Math.random() * (state.racers.length - 1));
                 const r1 = state.racers[idx];
                 const r2 = state.racers[idx + 1];
@@ -2130,9 +2642,20 @@
 
     // Filter out crashed racers from any active racer list used for commentary.
     // Spec: "disregard them from the commentary, do not use their name again."
+    // Per spec v2.78: ALSO filter out racers who've already finished the
+    // race — "Do not include drivers ahead of the player if they finish the
+    // race." Same principle: once they're out of the race (whether by crash
+    // or by crossing the line), commentary about them is irrelevant.
     function excludeCrashed (racers) {
-        if (!otherCrashedNames.size) return racers;
-        return racers.filter(function (r) { return !otherCrashedNames.has(r.name); });
+        if (!otherCrashedNames.size && (!knownFinishers || !knownFinishers.size)) return racers;
+        return racers.filter(function (r) {
+            if (otherCrashedNames.has(r.name)) return false;
+            // Don't exclude the player themself from their own racer list
+            // just because they've been recorded as a finisher in some race
+            // state edge case.
+            if (r.name !== state.playerName && knownFinishers.has(r.name)) return false;
+            return true;
+        });
     }
 
     // ─── Status transition ────────────────────────────────────────────────────────
@@ -3635,11 +4158,30 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       <div id="tc-api-status" class="tc-set-hint"></div>
     </div>
     <div class="tc-set-hint">
-      A Public Access key is enough — racing track data is public.
-      Stored only in Tampermonkey on this device. Enables track-description
-      flavour lines pulled live from <code>api.torn.com/v2/racing/tracks</code>.
-      Leave blank to disable. Get a key at
+      Stored only in Tampermonkey on this device. Get a key at
       <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener" style="color:var(--c-blue);">torn.com/preferences#api</a>.
+    </div>
+    <div class="tc-set-divider"></div>
+    <div class="tc-set-lbl">Key access tiers</div>
+    <div class="tc-set-hint">
+      <strong style="color:var(--c-acc);">No key</strong> &mdash; basic
+      commentary works (status detection, leaderboard, lap times, all
+      built-in ambient lines). No track-description flavour, no track
+      records, no car-attribute flavour.<br><br>
+      <strong style="color:var(--c-blue);">Public key</strong> &mdash;
+      unlocks <em>track descriptions</em> (16 Torn tracks, ~108 keyword-
+      derived flavour lines weaving location/surface/feature detail into
+      commentary), and <em>track records</em> (top class lap times with
+      "Only 1.2s off the record" style references in lap-time commentary).<br><br>
+      <strong style="color:var(--c-green);">Minimal key</strong> &mdash;
+      everything above, PLUS <em>your enlisted-cars data</em>: car
+      attribute classification (top speed, acceleration, braking,
+      handling, dirt, tarmac on a Low/Medium/High scale relative to your
+      car's class), and race-record flavour. Lines like "{car} is with
+      serious top end" or "tarmac grip a worry" appear automatically
+      when relevant to the current track.<br><br>
+      Either key type can be entered &mdash; the script uses whatever
+      access it has and gracefully drops lines it can't populate.
     </div>
   </div>
 </div>
