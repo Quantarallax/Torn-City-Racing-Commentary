@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.84.0
+// @version      2.86.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.84.0';
+    const SCRIPT_VERSION = '2.86.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -1766,12 +1766,14 @@
         const haveDesc = !!getCurrentTrackDescription();
         // For records-driven gap tokens we also need at least one lap recorded.
         const haveLaps = state.lapTimesSec && state.lapTimesSec.length > 0;
-        // Per spec v2.83: once finishers thin out the field, racer-slot
+        // Per spec v2.83/v2.86: once finishers thin out the field, racer-slot
         // tokens ({leader}, {p2}, {p3}, {last}) can resolve to em-dash
-        // because state.racers no longer has enough entries. Filter such
-        // templates out instead of letting them render "{leader} leads from
-        // — and —. Every lap a new story." which reads broken.
-        const racerCount = state.racers ? state.racers.length : 0;
+        // because the active racer count drops. Filter such templates out
+        // instead of letting them render "{leader} leads from — and —."
+        // Use the ACTIVE count (excluding finishers) since v2.86: finishers
+        // stay in state.racers for leaderboard display, but the racer-slot
+        // tokens resolve via getActiveRacers().
+        const racerCount = getActiveRacers().length;
         return pool.filter(function (tpl) {
             if (typeof tpl !== 'string') return false;
             if (/\{recordGap\}/.test(tpl) && !(haveRecord && haveLaps)) return false;
@@ -1934,10 +1936,15 @@
             track: state.track !== '—' ? state.track : 'the circuit',
             car: state.car !== '—' ? state.car : 'their car',
             pos: ordinal(parseInt(state.position, 10) || 0),
-            leader: state.racers[0] ? state.racers[0].name : '—',
-            p2: state.racers[1] ? state.racers[1].name : '—',
-            p3: state.racers[2] ? state.racers[2].name : '—',
-            last: state.racers.length > 0 ? state.racers[state.racers.length - 1].name : '—',
+            // Per spec v2.86: token tokens for racer slots use active racers
+            // (excluding crashed and finishers) so commentary doesn't say
+            // "Jim leads from Bob" when Jim is already in the pits. The
+            // leaderboard display keeps showing finishers though — that's
+            // rendered from state.racers directly elsewhere.
+            leader: (function () { const a = getActiveRacers(); return a[0] ? a[0].name : '—'; })(),
+            p2: (function () { const a = getActiveRacers(); return a[1] ? a[1].name : '—'; })(),
+            p3: (function () { const a = getActiveRacers(); return a[2] ? a[2].name : '—'; })(),
+            last: (function () { const a = getActiveRacers(); return a.length > 0 ? a[a.length - 1].name : '—'; })(),
             // {lastDesc} — describes the last-place racer's position phrasing.
             // Per spec v2.75:
             //   field ≤5: use their ordinal position ("in 5th") — "at the
@@ -1945,8 +1952,10 @@
             //             of cars to be at the back of.
             //   field >5: a random pick between "at the back" and "in last
             //             position" — both read naturally in larger fields.
+            // Per spec v2.86: use active count, not total field — finishers
+            // shouldn't count toward "back of the pack" calculation.
             lastDesc: (function () {
-                const n = state.racers.length;
+                const n = getActiveRacers().length;
                 if (n === 0) return '';
                 if (n <= 5) {
                     return 'in ' + ordinal(n);
@@ -2532,7 +2541,11 @@
             }
             // Position calls — gated by cooldown; pool selection uses authoritative racerCount.
             // Suppressed when player is alone (no other racers left to reference).
-            if (now >= tPosition && now >= tPosCooldown && state.racers.length >= 2 && !lonely) {
+            // Per spec v2.86: use active racer count — finishers stay on the
+            // leaderboard but shouldn't keep position-change commentary alive
+            // when the active field has dropped below 2.
+            const activeCount = getActiveRacers().length;
+            if (now >= tPosition && now >= tPosCooldown && activeCount >= 2 && !lonely) {
                 if (bigRaceShouldShow()) {
                     if (isThreePlusRace()) {
                         // 3+ racers confirmed from Position: X/Y — safe to use position3 lines
@@ -2548,41 +2561,23 @@
             // Movement and proximity also gated on !lonely — no other racers
             // means nothing to move past or alongside.
             if (!lonely) detectMovement();
-            if (now >= tProximity && state.racers.length >= 2 && !lonely) {
-                // Per spec v2.82: proximity commentary should fire when the
-                // actual completion gap between adjacent racers is within
-                // 0.1%. We compute this from per-racer % completions scraped
-                // from the DOM. When completion data isn't available (older
-                // Torn UI variant or scrape failure), fall back to the
-                // legacy random-leaderboard-adjacent pick so the feature
-                // still produces lines, just without the gap guarantee.
+            if (now >= tProximity && activeCount >= 2 && !lonely) {
+                // Per spec v2.82: proximity commentary fires when the actual
+                // completion gap between adjacent racers is within 0.1%.
+                // Per spec v2.84: convention is p1=chaser (behind), p2=
+                // defender (ahead).
                 //
-                // Per spec v2.84 MESSAGES INVOLVING TWO PLAYERS: the
-                // convention for the two-player tokens is:
-                //   {p1name} = the racer BEHIND (chaser, attacker)
-                //   {p2name} = the racer AHEAD  (defender, leader of pair)
-                // This is what makes directional templates read correctly:
-                //   "{p1} right on the bumper of {p2}"        — chaser on
-                //                                                 defender's
-                //                                                 bumper ✓
-                //   "{p1} bumps their fender, {p2} brake checks" — chaser
-                //                                                 bumps,
-                //                                                 defender
-                //                                                 brake-
-                //                                                 checks ✓
-                //   "{p1} tries the move on {p2}"             — chaser
-                //                                                 overtakes
-                //                                                 defender ✓
-                // Symmetric templates (side by side, wheel to wheel, locked
-                // in a duel) read the same with either assignment, so the
-                // convention is purely about getting the directional ones
-                // right.
+                // Per spec v2.85 BUG FIX: the previous (v2.82-v2.84) version
+                // had a legacy fallback that fired proximity commentary
+                // against a random adjacent leaderboard pair when completion
+                // data wasn't available. That violated the spec by firing
+                // proximity lines for racers who weren't actually close.
+                // Strict mode now: no completion scrape = no fire.
                 const completions = scrapeRacerCompletions();
                 const haveCompletions = Object.keys(completions).length >= 2;
                 let p1 = null, p2 = null;
                 if (haveCompletions) {
-                    // Strict mode: only fire when gap < 0.1%.
-                    const closePair = findClosestPair(state.racers, completions, 0.1);
+                    const closePair = findClosestPair(getActiveRacers(), completions, 0.1);
                     if (closePair) {
                         // Cooldown per pair so a sustained 0.1% battle
                         // doesn't refire every poll.
@@ -2595,16 +2590,10 @@
                             recentProximityPairs[key] = now;
                         }
                     }
-                } else {
-                    // Legacy fallback: random adjacent leaderboard pair.
-                    // state.racers is leaderboard-ordered (pos 1, 2, 3...)
-                    // so racers[idx] is AHEAD of racers[idx+1]. Map to the
-                    // chaser/defender convention by assigning the higher-
-                    // indexed (further-back) racer to p1.
-                    const idx = Math.floor(Math.random() * (state.racers.length - 1));
-                    p1 = state.racers[idx + 1];
-                    p2 = state.racers[idx];
                 }
+                // No else branch — when scraping fails or no pair is close
+                // enough, proximity stays silent. This is correct: better
+                // no commentary than wrong commentary.
                 if (p1 && p2 && bigRaceShouldShow()) {
                     pushLine(
                         fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: p1.name, p2name: p2.name }),
@@ -2613,18 +2602,24 @@
                 }
                 // Advance the cadence whether or not we fired. When we did
                 // fire, use the full gap to space lines out. When we didn't
-                // (no close pair OR cooldown), re-check sooner since the
-                // race state can change quickly.
+                // (no close pair OR cooldown OR no scrape data), re-check
+                // sooner since the race state can change quickly.
                 if (p1 && p2) {
                     tProximity = now + PROXIMITY_GAP + Math.random() * 8000;
                 } else {
                     tProximity = now + 4000;
                 }
             }
-            if (now >= tFunny && state.racers.length > 0) {
-                const r = state.racers[Math.floor(Math.random() * state.racers.length)];
-                pushLine(fill(pickLine(LINES.RACING.funny, 'funny'), { name: r.name }), 'ambient');
-                tFunny = now + FUNNY_GAP + Math.random() * 20000;
+            // Per spec v2.86: funny commentary should only feature racers
+            // still in the race — joking about a racer who's already in the
+            // pits reads wrong.
+            if (now >= tFunny) {
+                const active = getActiveRacers();
+                if (active.length > 0) {
+                    const r = active[Math.floor(Math.random() * active.length)];
+                    pushLine(fill(pickLine(LINES.RACING.funny, 'funny'), { name: r.name }), 'ambient');
+                    tFunny = now + FUNNY_GAP + Math.random() * 20000;
+                }
             }
             checkHalfway();
         }
@@ -2636,7 +2631,11 @@
         state.prevRacers.forEach(function (r) { prevMap[r.name] = r.posNum; });
         const gains = [];
         const losses = [];
-        state.racers.forEach(function (r) {
+        // Per spec v2.86: iterate only active racers. Finishers stay on
+        // the leaderboard with their position intact (so excludeCrashed
+        // no longer mutates state.racers) but movement commentary should
+        // never reference a finisher — they're not moving anywhere.
+        getActiveRacers().forEach(function (r) {
             const prev = prevMap[r.name];
             if (!prev || prev === r.posNum) return;
             const isLeader = (r.posNum === 1 || prev === 1);
@@ -2812,8 +2811,12 @@
     // Returns { [name]: pct } where pct is in [0, 100].
     function scrapeRacerCompletions () {
         const result = {};
+        // Accept both ul and div hosts, and both underscore and hyphen
+        // class-name variants. The driver-item structure has shifted across
+        // Torn racing UI iterations.
         const rows = document.querySelectorAll(
-            'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"]'
+            'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"], ' +
+            'div.driver-item, div[class*="driver-item"], div[class*="driver_item"]'
         );
         if (!rows || !rows.length) return result;
         rows.forEach(function (row) {
@@ -2829,42 +2832,73 @@
             // Strategy 1: dedicated completion/progress element with text.
             const compEl = row.querySelector(
                 'li.completion, li[class*="completion"], li.percent, li[class*="percent"], ' +
-                'li.progress, li[class*="progress"]'
+                'li.progress, li[class*="progress"], li[class*="complete"]'
             );
             if (compEl) {
-                const m = (compEl.textContent || '').match(/(\d+(?:\.\d+)?)\s*%?/);
+                const m = (compEl.textContent || '').match(/(\d+(?:\.\d+)?)\s*%/);
                 if (m) {
                     const v = parseFloat(m[1]);
                     if (!isNaN(v) && v >= 0 && v <= 100) pct = v;
                 }
             }
 
-            // Strategy 2: progress bar inline-style width (Torn often
-            // renders progress as a div with style="width: 73.45%").
+            // Strategy 2: progress bar inline-style width. Per v2.85 BUG
+            // FIX, no longer excludes 0% or 100% width — the previous
+            // exclusion meant racers near the start or finish line wouldn't
+            // be detected. We still prefer non-extreme values when multiple
+            // matches exist (often the case in nested progress containers
+            // where the outer is 100% width and the inner is the real
+            // progress indicator).
             if (pct === null) {
                 const barEls = row.querySelectorAll('[style*="width"]');
+                let extremeFallback = null;
                 for (let i = 0; i < barEls.length; i++) {
                     const style = barEls[i].getAttribute('style') || '';
                     const m = style.match(/width:\s*(\d+(?:\.\d+)?)\s*%/);
                     if (m) {
                         const v = parseFloat(m[1]);
-                        // Skip 100% width fillers (full-width containers).
-                        // Also skip very small values that are probably
-                        // decorative bars rather than progress.
-                        if (!isNaN(v) && v > 0 && v < 100) { pct = v; break; }
+                        if (isNaN(v) || v < 0 || v > 100) continue;
+                        // Prefer non-extreme values (0 < v < 100). They're
+                        // more likely to be the real progress bar than a
+                        // 100%-width container or a 0%-width invisible bar.
+                        if (v > 0 && v < 100) { pct = v; break; }
+                        // Hold onto extremes as a fallback in case nothing
+                        // mid-range exists.
+                        if (extremeFallback === null) extremeFallback = v;
                     }
+                }
+                if (pct === null && extremeFallback !== null) {
+                    pct = extremeFallback;
                 }
             }
 
             // Strategy 3: data-completion / data-progress / data-percent
             // attributes anywhere in the row.
             if (pct === null) {
-                const dataEl = row.querySelector('[data-completion], [data-progress], [data-percent]');
+                const dataEl = row.querySelector(
+                    '[data-completion], [data-progress], [data-percent], [data-pct]'
+                );
                 if (dataEl) {
                     const raw = dataEl.getAttribute('data-completion')
                         || dataEl.getAttribute('data-progress')
-                        || dataEl.getAttribute('data-percent');
+                        || dataEl.getAttribute('data-percent')
+                        || dataEl.getAttribute('data-pct');
                     const v = parseFloat(raw);
+                    if (!isNaN(v) && v >= 0 && v <= 100) pct = v;
+                }
+            }
+
+            // Strategy 4 (per v2.85 BUG FIX): text-content sweep. If a row
+            // contains text like "73.45%" anywhere, use it as a last resort.
+            // This catches Torn UI variants that don't expose the percentage
+            // via a tagged element or progress-bar style. We extract from
+            // row.textContent (not row.innerText) to dodge layout reflow.
+            if (pct === null) {
+                // Don't pick up the leaderboard's "Position: 3/12" or similar
+                // ratios — only N.NN% (with explicit decimal and percent sign).
+                const m = (row.textContent || '').match(/(\d+\.\d+)\s*%/);
+                if (m) {
+                    const v = parseFloat(m[1]);
                     if (!isNaN(v) && v >= 0 && v <= 100) pct = v;
                 }
             }
@@ -3011,6 +3045,17 @@
             if (r.name !== state.playerName && knownFinishers.has(r.name)) return false;
             return true;
         });
+    }
+
+    // Per spec v2.86: keep finishers on the leaderboard with their
+    // positions intact. To do this we stop mutating state.racers with
+    // excludeCrashed() and instead derive an active-only list on demand
+    // for commentary call sites (movement, proximity, position changes,
+    // random racer picks, racer-slot tokens). The leaderboard render and
+    // anything else that wants the full positional view keeps reading
+    // state.racers directly.
+    function getActiveRacers () {
+        return excludeCrashed(state.racers || []);
     }
 
     // ─── Status transition ────────────────────────────────────────────────────────
@@ -3953,13 +3998,10 @@
                 // lonely-finish branch can see other racers crossing the line.
                 detectOtherFinishers();
             }
-            // Filter out crashed AND finished racers from the active commentary
-            // list. Both are out of the race and shouldn't appear in lines
-            // about position changes, proximity, or movement.
-            if (otherCrashedNames.size || (knownFinishers && knownFinishers.size)) {
-                state.racers = excludeCrashed(state.racers);
-                state.prevRacers = excludeCrashed(state.prevRacers);
-            }
+            // Per spec v2.86: do NOT mutate state.racers to remove finishers/
+            // crashed. Finishers must stay on the leaderboard with positions
+            // intact. Commentary call sites that need an active-only view
+            // call getActiveRacers() explicitly.
         }
 
         // Blank stats in all menu/error/quiet statuses
@@ -4179,9 +4221,9 @@
             // here too. This branch runs when scraping fails through the
             // primary leaderboard route (e.g. on a refresh during a race).
             detectOtherFinishers();
-            if (otherCrashedNames.size || (knownFinishers && knownFinishers.size)) {
-                state.racers = excludeCrashed(state.racers);
-            }
+            // Per spec v2.86: do NOT mutate state.racers — finishers stay
+            // on the leaderboard with positions intact. Use getActiveRacers()
+            // at commentary call sites for the filtered view.
         }
 
         fireCommentary(state.status);
@@ -4371,6 +4413,27 @@
                 + formatSecondsAsLapTime(topRec.lap_time)
                 + ' by ' + escH(topRec.driver_name || '?')
                 + ' in a ' + escH(topRec.car_item_name || '?'));
+        }
+
+        // Per spec v2.85: diagnostic for the proximity-scrape so the user
+        // can see if the DOM-completion detection is working without
+        // opening the console. Sample a live scrape and report counts.
+        // Only useful during racing — outside of races there are no rows.
+        if (isRacingLike(state.status)) {
+            try {
+                const comps = scrapeRacerCompletions();
+                const n = Object.keys(comps).length;
+                if (n >= 2) {
+                    detail.push('Proximity scrape: completion % detected for '
+                        + n + ' racers (strict 0.1% gating active).');
+                } else if (n === 1) {
+                    detail.push('Proximity scrape: only 1 racer\u2019s % detected \u2014 '
+                        + 'need at least 2 for gap calculation. Proximity messages disabled.');
+                } else {
+                    detail.push('Proximity scrape: no completion % detected. '
+                        + 'Proximity messages disabled. (DOM selectors may need updating.)');
+                }
+            } catch (_) {}
         }
 
         const html = [
