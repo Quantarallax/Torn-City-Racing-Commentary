@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.90.0
+// @version      2.91.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.90.0';
+    const SCRIPT_VERSION = '2.91.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -2566,13 +2566,14 @@
         // regardless of how many pre-launch ambient lines have been shown.
         // Hoisted out here, it always gets to run during PRE_LAUNCH.
         //
-        // Per spec v2.89: illegal-race flag sequence uses markers at 15s,
-        // 10s, 1s. Legal-race lights sequence still uses 5s, 3s, 2s, 1s.
-        // Pass anything in 1..15s through to fireLightOrFlagSequence which
-        // internally only acts on the right markers per race type.
+        // Per spec v2.91: legal-race lights markers expanded to 18s, 12s,
+        // 7s, 3s — earlier and more spread out than the previous 5/3/2/1.
+        // Illegal-race flag markers stay at 15s/10s/1s. Pass anything in
+        // 1..18s through to fireLightOrFlagSequence which internally only
+        // acts on the right markers per race type.
         if (st === S.PRE_LAUNCH) {
             const secs = scrapeCountdownSeconds();
-            if (secs !== null && secs <= 15 && secs >= 1) {
+            if (secs !== null && secs <= 18 && secs >= 1) {
                 fireLightOrFlagSequence(secs);
             }
         }
@@ -3677,19 +3678,19 @@
         return null;
     }
 
-    // Per spec v2.87 (revised v2.89): drag-race-tree style countdown for
+    // Per spec v2.87 (revised v2.91): drag-race-tree style countdown for
     // legal races, flag-wave sequence for illegal races. Each line fires
     // once per pre-launch (tracked in state.lightSeqFired keyed by second
     // marker). Called from the PRE_LAUNCH ambient dispatch when countdown
     // hits a marker second.
     //
-    // Sequences per spec v2.89:
+    // Sequences per spec v2.91:
     //
     //   Legal (Speedway only):
-    //     5s: All Lights Are Lit
-    //     3s: Blue Lights Off
-    //     2s: Amber Lights Off
-    //     1s: Green Lights Off
+    //     18s: All Lights Are Lit
+    //     12s: Blue Lights Off
+    //      7s: Amber Lights Off
+    //      3s: Green Lights Off
     //
     //   Illegal (all other tracks):
     //     15s: {FlagBearer} Is Ready
@@ -3723,17 +3724,17 @@
             return;
         }
 
-        // Legal (Speedway): markers at 5s, 3s, 2s, 1s
-        const marker = (secs === 5 || secs === 3 || secs === 2 || secs === 1) ? secs : null;
+        // Legal (Speedway): markers at 18s, 12s, 7s, 3s per spec v2.91
+        const marker = (secs === 18 || secs === 12 || secs === 7 || secs === 3) ? secs : null;
         if (!marker) return;
         if (state.lightSeqFired[marker]) return;
         state.lightSeqFired[marker] = true;
 
         const lines = {
-            5: 'All Lights Are Lit',
-            3: 'Blue Lights Off',
-            2: 'Amber Lights Off',
-            1: 'Green Lights Off'
+            18: 'All Lights Are Lit',
+            12: 'Blue Lights Off',
+            7: 'Amber Lights Off',
+            3: 'Green Lights Off'
         };
         pushLine(lines[marker], 'status', ICON.flag);
     }
