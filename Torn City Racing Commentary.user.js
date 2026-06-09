@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.76.0
+// @version      2.77.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.76.0';
+    const SCRIPT_VERSION = '2.77.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -324,8 +324,8 @@
             //   {avgTime}        = running average so far (MM:SS)
             //   {avgComparison}  = pre-formatted phrase for the change vs the
             //                      previous reported average, e.g.
-            //                      "-2 faster on last average" or
-            //                      "+3 slower than last average". Empty when
+            //                      "2s down on last average" or
+            //                      "3s slower than last average". Empty when
             //                      no prior reading or when level — the
             //                      "level" case uses dedicated templates
             //                      from lapTimeAverageLevel instead.
@@ -373,8 +373,8 @@
             ],
             lapTimeAverage: [
                 // Compared to the previous reported average. {avgComparison}
-                // expands to a pre-formatted phrase like "-2 faster on last
-                // average" or "+3 slower than last average". Per spec v2.68
+                // expands to a pre-formatted phrase like "2s down on last
+                // average" or "3s slower than last average". Per spec v2.68
                 // these are NOT used when the new average is level — see the
                 // dedicated lapTimeAverageLevel pool below.
                 "Running average {avgTime} for {player}. {avgComparison}.",
@@ -1550,12 +1550,13 @@
                 return formatSecondsAsLapTime(total / arr.length);
             })(),
             // {avgComparison} — pre-formatted phrase comparing the current
-            // running average to the previously-reported one. Per spec v2.68:
-            //   faster: "-2 faster on last average"
-            //   slower: "+3 slower than last average"
-            // (no trailing full stop — the template adds it). Empty string
-            // when there's no prior reading or when the diff is too small
-            // (caller should pick a "level with" template instead).
+            // running average to the previously-reported one. Per spec v2.77:
+            //   faster: "2s down on last average"
+            //   slower: "3s slower than last average"
+            // (no leading sign, suffix "s" on the number, no trailing full
+            // stop — the template adds it). Empty string when there's no
+            // prior reading or when the diff is too small (caller should
+            // pick a "level with" template instead).
             avgComparison: (function () {
                 const arr = state.lapTimesSec;
                 if (!arr.length || !state.lastAvgSec) return '';
@@ -1567,11 +1568,11 @@
                 // Round to nearest integer for the headline number.
                 const absRound = Math.round(Math.abs(diff));
                 if (diff < 0) {
-                    // Got faster — sign is minus.
-                    return '-' + absRound + ' faster on last average';
+                    // Got faster — "2s down on last average".
+                    return absRound + 's down on last average';
                 }
-                // Got slower — sign is plus.
-                return '+' + absRound + ' slower than last average';
+                // Got slower — "3s slower than last average".
+                return absRound + 's slower than last average';
             })(),
             // {trackFlavour} — per spec v2.76, a short context-appropriate
             // phrase derived from the track's characteristics that can be
@@ -3614,7 +3615,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     <div class="tc-cred-ver">Version ${escH(SCRIPT_VERSION)}</div>
     <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
     <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
-    <a class="tc-cred-forum" href="https://www.torn.com/forums.php#/p=threads&amp;f=21&amp;t=16559767&amp;b=0&amp;a=0&amp;start=20&amp;to=0" target="_blank" rel="noopener">Forum link: Bugs, feedback welcome!</a>
+    <a class="tc-cred-forum" href="https://www.torn.com/forums.php#/p=threads&amp;f=21&amp;t=16559767&amp;b=0&amp;a=0&amp;start=20&amp;to=0" target="_blank" rel="noopener">Forum link: Bugs, feedback and LIKES welcome!</a>
     <div class="tc-set-divider"></div>
     <div class="tc-set-row">
       <span class="tc-set-lbl">Commentary scroll</span>
