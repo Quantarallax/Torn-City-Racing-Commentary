@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.79.0
+// @version      2.80.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.79.0';
+    const SCRIPT_VERSION = '2.80.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -2640,6 +2640,75 @@
         });
     }
 
+    // Per spec v2.80: detect other racers crossing the finish line from the
+    // DOM. The previous logic only added the PLAYER to knownFinishers when
+    // ENDED status fired, which meant the lonely-finish branch (added in
+    // v2.78) could never trigger — there was always exactly one "finisher"
+    // (the player) but never any others to compare against.
+    //
+    // Spec-provided selector:
+    //   div.cont-black.bottom-round
+    //     div / ul.driver-item.driver-item_NEXT  (Torn uses both _ and - in
+    //                                              class names depending on
+    //                                              the page state)
+    //       li.name   - the driver's name
+    //       li.time   - format "00:00:00" when finished, empty/non-time
+    //                   when still racing
+    //
+    // This runs on every racing poll. Adding to knownFinishers is idempotent
+    // (Set semantics) so re-running is cheap.
+    function detectOtherFinishers () {
+        if (!isRacingLike(state.status)) return;
+        // Iterate every driver row on the page. We accept both ul and div
+        // hosts and both underscore and hyphen class-name variants because
+        // Torn's racing UI has shipped both forms historically. The crash/
+        // events-feed guards from the crash scraper apply here too.
+        const rows = document.querySelectorAll(
+            'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"], ' +
+            'div.driver-item, div[class*="driver-item"], div[class*="driver_item"]'
+        );
+        if (!rows || !rows.length) return;
+        rows.forEach(function (row) {
+            if (isInsideTornMenu(row)) return;
+            if (looksLikeEventsRow(row)) return;
+            // The time element only exists on finished rows. When present,
+            // its text matches HH:MM:SS or MM:SS — both valid finish times
+            // (a sub-hour race shows MM:SS in some Torn variants).
+            const timeEl = row.querySelector('li.time, li[class*="time"]');
+            if (!timeEl) return;
+            const tText = (timeEl.textContent || '').trim();
+            // Require a colon-separated time. Empty strings, "—", or stray
+            // numbers shouldn't trigger. Accepts 00:00:00 (HH:MM:SS) and
+            // 00:00 (MM:SS) defensively.
+            if (!/^\d{1,2}:\d{2}(:\d{2})?$/.test(tText)) return;
+            // Now pull the name. Same defensive selectors as the leaderboard
+            // scraper (li.name with possible inner span).
+            const nameEl = row.querySelector('li.name > span, li.name, li[class*="name"] > span, li[class*="name"]');
+            if (!nameEl) return;
+            let name = (nameEl.textContent || '').trim();
+            // Strip any stray prefixes ("You ", position numbers, etc.).
+            if (!name || name.length < 2 || name.length > 40) return;
+            if (/^\d+$/.test(name)) return;
+            if (/^You(\s|$)/.test(name)) return;
+            // Don't double-record. The player gets added by the existing
+            // ENDED-status path; we just record non-player finishers here.
+            if (name === state.playerName) return;
+            if (knownFinishers.has(name)) return;
+            if (otherCrashedNames.has(name)) return;
+            // Record the finisher. We don't fire a "X crosses the line"
+            // line here — per spec "It will not display other players who
+            // finish afterwards." The detection is purely for state
+            // tracking so the lonely-finish branch and commentary filtering
+            // (excludeCrashed) can do their job.
+            knownFinishers.add(name);
+            // Push into state.finishers too, with whatever position info we
+            // can muster. We don't strictly need the position for any
+            // downstream logic, but maintaining the shape keeps state
+            // serialisation consistent across versions.
+            state.finishers.push({ name: name, time: tText });
+        });
+    }
+
     // Filter out crashed racers from any active racer list used for commentary.
     // Spec: "disregard them from the commentary, do not use their name again."
     // Per spec v2.78: ALSO filter out racers who've already finished the
@@ -3576,11 +3645,14 @@
                 checkNewRacers();
                 // Scrape Torn's explicit crash markers each poll
                 detectOtherCrashes();
+                // Per spec v2.80: scrape finish times the same way so the
+                // lonely-finish branch can see other racers crossing the line.
+                detectOtherFinishers();
             }
-            // Filter out crashed racers from the active commentary list.
-            // They still exist in the DOM briefly but should be ignored entirely
-            // in all future commentary per the spec.
-            if (otherCrashedNames.size) {
+            // Filter out crashed AND finished racers from the active commentary
+            // list. Both are out of the race and shouldn't appear in lines
+            // about position changes, proximity, or movement.
+            if (otherCrashedNames.size || (knownFinishers && knownFinishers.size)) {
                 state.racers = excludeCrashed(state.racers);
                 state.prevRacers = excludeCrashed(state.prevRacers);
             }
@@ -3799,7 +3871,11 @@
         // and catches any crash already in the DOM after a page refresh.
         if (isRacingLike(state.status) || restoredIntoRacing) {
             detectOtherCrashes();
-            if (otherCrashedNames.size) {
+            // Per spec v2.80: same parallel call so finishers are picked up
+            // here too. This branch runs when scraping fails through the
+            // primary leaderboard route (e.g. on a refresh during a race).
+            detectOtherFinishers();
+            if (otherCrashedNames.size || (knownFinishers && knownFinishers.size)) {
                 state.racers = excludeCrashed(state.racers);
             }
         }
