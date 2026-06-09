@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.88.0
+// @version      2.90.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.88.0';
+    const SCRIPT_VERSION = '2.90.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -250,7 +250,7 @@
                 'Every driver coiled and ready. The start is almost upon us.',
                 'The grid trembles with anticipation. Seconds away.',
                 'All systems ready. The crowd has gone eerily quiet.',
-                'The lights are about to come on. This is the moment.',
+                'The {startSignal}. This is the moment.',
                 'Pre-launch can be the worst part of the race.',
                 '{player} is shaking behind the wheel.',
                 'Faction members hold banners up, their message clear.'
@@ -551,7 +551,7 @@
                 'Watch {player} {trackFlavour}. They\'re finding tenths there.'
             ],
             funny: [
-                '{name} appears to be shooting at other cars.',
+                '{name} appears to be shooting out their side window.',
                 '{name} is driving backwards.',
                 'Looks like {name} is drinking a bottle of beer, feet on the steering wheel.',
                 '{name} pulls a 360, just for a laugh.',
@@ -2040,6 +2040,14 @@
                 return Math.random() < 0.5 ? 'at the back' : 'in last position';
             })(),
             total: String(state.racerCount || state.racers.length || '?'),
+            // Per spec v2.90 BUG FIX: lights vs flag start signal. Illegal
+            // races (everything but Speedway) use a flag drop, so any line
+            // that references "lights are about to come on" reads wrong.
+            // Template lines that need to mention the start signal should
+            // use {startSignal} to get the right phrasing per track type.
+            startSignal: isIllegalTrack(state.track)
+                ? 'flag is about to drop'
+                : 'lights are about to come on',
             countdown: scrapeCountdown() || 'a few moments',
             // {trackDesc} comes from the Torn v2 API /racing/tracks endpoint
             // matched by title. Empty string if no API key set or not yet
@@ -2556,14 +2564,15 @@
 
         // Per spec v2.88 BUG FIX: light/flag countdown sequence MUST fire
         // regardless of how many pre-launch ambient lines have been shown.
-        // The v2.87 placement nested this inside the cap-gated branch, so
-        // once preLaunchMsgCount hit PRE_LAUNCH_MAX (3 ambient lines), the
-        // whole branch stopped running and the 5/3/2/1s sequence was
-        // silently skipped. Hoisted out here, it always gets to run during
-        // PRE_LAUNCH.
+        // Hoisted out here, it always gets to run during PRE_LAUNCH.
+        //
+        // Per spec v2.89: illegal-race flag sequence uses markers at 15s,
+        // 10s, 1s. Legal-race lights sequence still uses 5s, 3s, 2s, 1s.
+        // Pass anything in 1..15s through to fireLightOrFlagSequence which
+        // internally only acts on the right markers per race type.
         if (st === S.PRE_LAUNCH) {
             const secs = scrapeCountdownSeconds();
-            if (secs !== null && secs <= 5 && secs >= 1) {
+            if (secs !== null && secs <= 15 && secs >= 1) {
                 fireLightOrFlagSequence(secs);
             }
         }
@@ -3668,51 +3677,65 @@
         return null;
     }
 
-    // Per spec v2.87: drag-race-tree style countdown for legal races, flag-
-    // wave sequence for illegal races. Each line fires once per pre-launch
-    // (tracked in state.lightSeqFired keyed by second marker). Called from
-    // the PRE_LAUNCH ambient dispatch when countdown <= 5s.
+    // Per spec v2.87 (revised v2.89): drag-race-tree style countdown for
+    // legal races, flag-wave sequence for illegal races. Each line fires
+    // once per pre-launch (tracked in state.lightSeqFired keyed by second
+    // marker). Called from the PRE_LAUNCH ambient dispatch when countdown
+    // hits a marker second.
     //
-    // Sequence per spec:
-    //   5s: All Lights Are Lit    / Flag Girl/Guy Is Ready
-    //   3s: Blue Lights Off       / Flag Girl/Guy Raised The Flag
-    //   2s: Amber Lights Off      / Flag Girl/Guy Waves The Flag
-    //   1s: Green Lights Off      / Flag Girl/Guy Drops The Flag / "Start"
+    // Sequences per spec v2.89:
+    //
+    //   Legal (Speedway only):
+    //     5s: All Lights Are Lit
+    //     3s: Blue Lights Off
+    //     2s: Amber Lights Off
+    //     1s: Green Lights Off
+    //
+    //   Illegal (all other tracks):
+    //     15s: {FlagBearer} Is Ready
+    //     10s: {FlagBearer} Raises The Flag
+    //      1s: {FlagBearer} Waves The Flag — Start!
     //
     // For illegal races, the flag-bearer's gender is decided once per race
-    // (at the 5s mark) and remembered for the rest of the sequence to keep
-    // wording consistent.
+    // (at the first fired marker) and remembered for the rest of the
+    // sequence to keep wording consistent.
     function fireLightOrFlagSequence (secs) {
-        // Map countdown seconds to the marker we want — only fire on the
-        // exact spec markers, not on intermediate seconds.
-        const marker = (secs === 5 || secs === 3 || secs === 2 || secs === 1) ? secs : null;
-        if (!marker) return;
-        if (state.lightSeqFired[marker]) return;
-        state.lightSeqFired[marker] = true;
-
         const illegal = isIllegalTrack(state.track);
+
         if (illegal) {
+            // Illegal: markers at 15s, 10s, 1s
+            const marker = (secs === 15 || secs === 10 || secs === 1) ? secs : null;
+            if (!marker) return;
+            if (state.lightSeqFired[marker]) return;
+            state.lightSeqFired[marker] = true;
+
             // Pick gender once per race, remember it for subsequent lines.
             if (!state.lightSeqFlagBearer) {
                 state.lightSeqFlagBearer = Math.random() < 0.5 ? 'Flag Girl' : 'Flag Guy';
             }
             const fb = state.lightSeqFlagBearer;
             const lines = {
-                5: fb + ' Is Ready',
-                3: fb + ' Raised The Flag',
-                2: fb + ' Waves The Flag',
-                1: fb + ' Drops The Flag \u2014 Start!'
+                15: fb + ' Is Ready',
+                10: fb + ' Raises The Flag',
+                1: fb + ' Waves The Flag \u2014 Start!'
             };
             pushLine(lines[marker], 'status', ICON.flag);
-        } else {
-            const lines = {
-                5: 'All Lights Are Lit',
-                3: 'Blue Lights Off',
-                2: 'Amber Lights Off',
-                1: 'Green Lights Off'
-            };
-            pushLine(lines[marker], 'status', ICON.flag);
+            return;
         }
+
+        // Legal (Speedway): markers at 5s, 3s, 2s, 1s
+        const marker = (secs === 5 || secs === 3 || secs === 2 || secs === 1) ? secs : null;
+        if (!marker) return;
+        if (state.lightSeqFired[marker]) return;
+        state.lightSeqFired[marker] = true;
+
+        const lines = {
+            5: 'All Lights Are Lit',
+            3: 'Blue Lights Off',
+            2: 'Amber Lights Off',
+            1: 'Green Lights Off'
+        };
+        pushLine(lines[marker], 'status', ICON.flag);
     }
 
     function scrapeTrack () {
