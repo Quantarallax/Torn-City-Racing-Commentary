@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.78.0
+// @version      2.79.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.78.0';
+    const SCRIPT_VERSION = '2.79.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -3917,6 +3917,95 @@
         if (arrow) arrow.innerHTML = isUp ? '&#8593;' : '&#8595;';
     }
 
+    // Per spec v2.79: "Show which key is active, and show summary line of
+    // what has been retrieved." This populates the diagnostic block on the
+    // settings page with the inferred key tier and counts of cached data.
+    // Called whenever the settings panel is opened so the user sees current
+    // truth, not a stale snapshot.
+    //
+    // Tier inference:
+    //   - No key entered → "No key"
+    //   - carsOK true → Minimal key (the /v2/user/enlistedcars endpoint
+    //                   only succeeds with minimal or higher access)
+    //   - tracksOK or recordsOK true → Public key (these endpoints are
+    //                   public and need no user-data scope)
+    //   - Key entered but no flags yet → "Detecting…" (first poll hasn't
+    //                   returned, or the key is invalid — same UX either way
+    //                   until enough time has passed)
+    function refreshKeyDiagnostic () {
+        const el = document.getElementById('tc-key-diag');
+        if (!el) return;
+
+        const key = getApiKey();
+        // Build tier headline.
+        let tier = '';
+        let tierColor = 'var(--c-dim)';
+        if (!key) {
+            tier = 'No key entered';
+            tierColor = 'var(--c-orange)';
+        } else if (keyAccessFlags.carsOK) {
+            tier = 'Minimal key (full access)';
+            tierColor = 'var(--c-green)';
+        } else if (keyAccessFlags.tracksOK || keyAccessFlags.recordsOK) {
+            tier = 'Public key (limited access)';
+            tierColor = 'var(--c-blue)';
+        } else {
+            tier = 'Key set, awaiting first response\u2026';
+            tierColor = 'var(--c-orange)';
+        }
+
+        // Build summary of what's been retrieved.
+        const lines = [];
+        if (tracksCache && Array.isArray(tracksCache.tracks) && tracksCache.tracks.length) {
+            lines.push(tracksCache.tracks.length + ' track descriptions cached');
+        }
+        if (recordsCache && recordsCache.byKey) {
+            const recKeys = Object.keys(recordsCache.byKey);
+            if (recKeys.length) {
+                let recordsTotal = 0;
+                for (let i = 0; i < recKeys.length; i++) {
+                    const block = recordsCache.byKey[recKeys[i]];
+                    if (block && Array.isArray(block.records)) recordsTotal += block.records.length;
+                }
+                lines.push(recordsTotal + ' track records across ' + recKeys.length + ' (track, class) keys');
+            }
+        }
+        if (carsCache && Array.isArray(carsCache.cars) && carsCache.cars.length) {
+            lines.push(carsCache.cars.length + ' enlisted cars cached');
+        }
+
+        // Build current-context detail (if available) — useful for
+        // "is this actually working" debugging without opening the console.
+        const detail = [];
+        const car = getPlayerCarData();
+        if (car) {
+            detail.push('Current car: ' + escH(car.car_item_name || '?')
+                + ' (Class ' + escH(String(car.class || '?'))
+                + ', ' + (car.races_won || 0) + '/' + (car.races_entered || 0) + ' wins)');
+        } else if (key && state.car && state.car !== '\u2014' && carsCache) {
+            detail.push('Current car (' + escH(state.car) + ') not matched in enlisted cars cache.');
+        }
+        const topRec = getTopTrackRecord();
+        if (topRec) {
+            detail.push('Class record at ' + escH(state.track || '?') + ': '
+                + formatSecondsAsLapTime(topRec.lap_time)
+                + ' by ' + escH(topRec.driver_name || '?')
+                + ' in a ' + escH(topRec.car_item_name || '?'));
+        }
+
+        const html = [
+            '<div style="color:' + tierColor + ';font-weight:600;margin-bottom:4px;">'
+                + escH(tier) + '</div>',
+            lines.length
+                ? '<div>Cached:<br>&bull; ' + lines.map(escH).join('<br>&bull; ') + '</div>'
+                : '<div style="color:var(--c-dim);">Nothing cached yet.</div>',
+            detail.length
+                ? '<div style="margin-top:6px;">' + detail.join('<br>') + '</div>'
+                : ''
+        ].join('');
+        el.innerHTML = html;
+    }
+
     function updatePauseBtn () {
         const btn = document.getElementById('tc-btn-pause');
         if (!btn) return;
@@ -4162,9 +4251,12 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener" style="color:var(--c-blue);">torn.com/preferences#api</a>.
     </div>
     <div class="tc-set-divider"></div>
+    <div class="tc-set-lbl">Active key status</div>
+    <div id="tc-key-diag" class="tc-set-hint">Open settings to refresh.</div>
+    <div class="tc-set-divider"></div>
     <div class="tc-set-lbl">Key access tiers</div>
     <div class="tc-set-hint">
-      <strong style="color:var(--c-acc);">No key</strong> &mdash; basic
+      <strong style="color:var(--c-orange);">No key</strong> &mdash; basic
       commentary works (status detection, leaderboard, lap times, all
       built-in ambient lines). No track-description flavour, no track
       records, no car-attribute flavour.<br><br>
@@ -4211,6 +4303,18 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             document.getElementById('tc-btn-settings').style.display = 'none';
             document.getElementById('tc-btn-back').style.display = '';
             updateScrollDirBtn();
+            // Per spec v2.79: refresh the active-key diagnostic each time
+            // settings is opened. Also kick off lazy fetches for any data
+            // we don't have yet — most useful when the user has JUST entered
+            // a key and wants to confirm it's working without waiting for
+            // the next race tick to surface a flavour line.
+            try {
+                if (getApiKey()) {
+                    if (!tracksCache) fetchTracksFromApi();
+                    fetchEnlistedCars();
+                }
+            } catch (_) {}
+            refreshKeyDiagnostic();
         });
         document.getElementById('tc-btn-back').addEventListener('click', function () {
             document.getElementById('tc-rc-settings').style.display = 'none';
@@ -4254,8 +4358,11 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                 setApiKey(val);
                 apiStatus.className = 'tc-set-hint tc-ok';
                 apiStatus.textContent = 'Saved. Fetching tracks…';
-                // Trigger an immediate fetch so the user sees the cache populate.
+                // Per spec v2.78: try the user-data endpoint too so we can
+                // detect whether this is a minimal key. Public keys will fail
+                // silently and we'll just see the tracks/records calls succeed.
                 fetchTracksFromApi();
+                fetchEnlistedCars();
                 // Re-check the cache after a short delay to give the user feedback.
                 setTimeout(function () {
                     if (!apiStatus) return;
@@ -4266,6 +4373,9 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                         apiStatus.className = 'tc-set-hint';
                         apiStatus.textContent = 'Saved. Cache will populate on next API call.';
                     }
+                    // Refresh the diagnostic so the user sees the tier
+                    // detection update once the first response lands.
+                    refreshKeyDiagnostic();
                 }, 2500);
             });
         }
@@ -4370,6 +4480,25 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             // Warm the tracks cache on startup so apiAmbient lines become
             // available as soon as possible. If no key is set, this no-ops.
             try { fetchTracksFromApi(); } catch (_) {}
+            // Per spec v2.79: hydrate keyAccessFlags from any existing
+            // caches so the settings-page diagnostic reflects historical
+            // success across page refreshes — not just the current session.
+            // Without this, the diagnostic would say "awaiting first response"
+            // even when the user has perfectly valid week-old cached data.
+            try {
+                if (!tracksCache) tracksCache = loadTracksCache();
+                if (tracksCache && tracksCache.tracks && tracksCache.tracks.length) {
+                    keyAccessFlags.tracksOK = true;
+                }
+                if (!recordsCache) recordsCache = loadRecordsCache();
+                if (recordsCache && recordsCache.byKey && Object.keys(recordsCache.byKey).length) {
+                    keyAccessFlags.recordsOK = true;
+                }
+                if (!carsCache) carsCache = loadCarsCache();
+                if (carsCache && carsCache.cars && carsCache.cars.length) {
+                    keyAccessFlags.carsOK = true;
+                }
+            } catch (_) {}
         } catch (e) {
             // If init fails, log loudly but still try to build the HUD so the
             // user sees *something* and can report what went wrong. A thrown
