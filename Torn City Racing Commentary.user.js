@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.86.0
+// @version      2.87.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.86.0';
+    const SCRIPT_VERSION = '2.87.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -715,7 +715,11 @@
         // these because a page refresh during a race shouldn't replay the
         // start-grid lines (we're already underway).
         raceStartedAt: 0,
-        startGridLinesFired: 0
+        startGridLinesFired: 0,
+        // Per spec v2.87: track which light/flag sequence lines have fired
+        // during pre-launch. Keys are the second markers (5, 3, 2, 1).
+        // Session-only; cleared on race entry.
+        lightSeqFired: {}
     };
 
     // commentaryPaused — session only, never persisted. Manual via the Pause button.
@@ -1219,6 +1223,68 @@
     // lake, bay/coast, and so on. The detection also picks up driving-style
     // hints (speed-focused, handling-focused, balanced) which let flavour
     // lines reference what kind of car/skill the track rewards.
+    // Per spec v2.87 TRACK LENGTHS: track lengths in miles, used to scale
+    // proximity threshold per-track. Speedway is the baseline (0.1% gap =
+    // close proximity). For longer tracks the same physical proximity
+    // requires a smaller % gap; for shorter tracks, a larger % gap.
+    //
+    // Values per Torn wiki Raceway page. Where the wiki gives a range, the
+    // mid value is used. Keys match Torn track names exactly (used by
+    // getTrackInfo lookups).
+    const TRACK_LENGTHS_MI = {
+        'Uptown': 5.74,
+        'Withdrawal': 8.66,
+        'Underdog': 4.50,
+        'Parkland': 4.46,
+        'Docks': 4.46,
+        'Commerce': 4.51,
+        'Two Islands': 3.83,
+        'Industrial': 3.04,
+        'Vector': 3.49,
+        'Mudpit': 5.30,
+        'Hammerhead': 4.55,
+        'Sewage': 3.61,
+        'Meltdown': 3.42,
+        'Speedway': 2.66,
+        'Stone Park': 2.45,
+        'Convict': 3.85
+    };
+    const SPEEDWAY_BASELINE_PCT = 0.1;
+    const SPEEDWAY_LENGTH_MI = TRACK_LENGTHS_MI.Speedway;
+
+    // Returns the close-proximity % threshold for a given track name.
+    // Falls back to 0.1% if the track isn't in the table (defensive — the
+    // map covers all 16 currently in-game tracks but Torn may add more).
+    //
+    // Formula: threshold% = 0.1 × (L_speedway / L_track)
+    // Longer tracks → narrower % threshold (same physical gap is a smaller
+    // fraction of the lap). Shorter tracks → wider % threshold.
+    function getProximityThresholdForTrack (trackName) {
+        if (!trackName || !TRACK_LENGTHS_MI[trackName]) {
+            return SPEEDWAY_BASELINE_PCT;
+        }
+        const len = TRACK_LENGTHS_MI[trackName];
+        return SPEEDWAY_BASELINE_PCT * (SPEEDWAY_LENGTH_MI / len);
+    }
+
+    // Per spec v2.87 PRE-LAUNCH JUST BEFORE ACTUAL LAUNCH:
+    // Determines whether a track is a legal sanctioned race (lights start)
+    // or an illegal street race (flag start). In Torn lore Speedway is the
+    // only proper sanctioned circuit; everything else is an illegal street
+    // race even if the track surface is tarmac.
+    //
+    // The spec says "use track description to work this out" — we infer
+    // from track characteristic tags which derive from API descriptions.
+    // The 'legendary' tag fires on Speedway uniquely. Falls back to
+    // illegal=true for unknown tracks since the vast majority are illegal.
+    function isIllegalTrack (trackName) {
+        if (!trackName || trackName === '\u2014') return true;
+        // Speedway is the one Torn-sanctioned circuit.
+        if (trackName === 'Speedway') return false;
+        // All other tracks in Torn are illegal street/industrial races.
+        return true;
+    }
+
     function getTrackCharacteristics () {
         const info = getTrackInfo(state.track);
         if (!info || typeof info.description !== 'string') return {};
@@ -1445,7 +1511,7 @@
         ]},
         { tag: 'oval', lines: [
             'Round and round we go — oval racing is its own discipline.',
-            'Constant left-handers mean uneven tyre wear.',
+            'Constant right-handers mean uneven tyre wear.',
             'On an oval, the slipstream is king.'
         ]},
         { tag: 'hilly', lines: [
@@ -2474,6 +2540,17 @@
         }
 
         if (st === S.PRE_LAUNCH && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
+            // Per spec v2.87: in the last 5 seconds of pre-launch, fire the
+            // light sequence (legal races) or flag sequence (illegal races).
+            // Markers at 5s, 3s, 2s, 1s. Each fires once. The normal start
+            // message gets fired by the PRE_LAUNCH→RACING transition.
+            // We check countdown FIRST so it has priority over normal
+            // pre-launch ambient — the sequence must hit its marks.
+            const secs = scrapeCountdownSeconds();
+            if (secs !== null && secs <= 5 && secs >= 1) {
+                fireLightOrFlagSequence(secs);
+            }
+
             if (now >= tAmbient) {
                 // Per spec v2.75: track-description-flavoured messages can
                 // appear during PRE_LAUNCH as well as RACING/COUNTDOWN.
@@ -2577,7 +2654,11 @@
                 const haveCompletions = Object.keys(completions).length >= 2;
                 let p1 = null, p2 = null;
                 if (haveCompletions) {
-                    const closePair = findClosestPair(getActiveRacers(), completions, 0.1);
+                    // Per spec v2.87: threshold scales by track length so
+                    // "0.1% on Speedway" equals the same physical car gap
+                    // regardless of which track is being raced.
+                    const threshold = getProximityThresholdForTrack(state.track);
+                    const closePair = findClosestPair(getActiveRacers(), completions, threshold);
                     if (closePair) {
                         // Cooldown per pair so a sustained 0.1% battle
                         // doesn't refire every poll.
@@ -3102,6 +3183,9 @@
                 // previous race don't leak in.
                 state.raceStartedAt = 0;
                 state.startGridLinesFired = 0;
+                // Per spec v2.87: clear light/flag sequence trackers so the
+                // sequence fires once per pre-launch.
+                state.lightSeqFired = {};
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -3167,17 +3251,36 @@
             pushLine('Not enough drivers to start this race. Waiting\u2026', 'waiting', ICON.wait);
         }
         if (newSt === S.RACING) {
-            // Only fire the green-light message if this is a genuine new race start,
-            // not a restore bounce (COUNTDOWN→RACING on page load after refresh)
-            if (!restoredIntoRacing) {
+            // Per spec v2.87 BUG FIX: only fire the green-light and start-
+            // grid commentary when this is a GENUINE race start, not when
+            // the player navigates back to the racing tab partway through
+            // a race in progress (e.g. they visited STATISTICS / ENLISTED /
+            // IN_GARAGE while the race was running and now return).
+            //
+            // Two guards:
+            //   1. Previous status must be PRE_LAUNCH or COUNTDOWN — the
+            //      only legitimate pre-race statuses that transition into
+            //      RACING when the lights/flag actually go.
+            //   2. Completion % must be effectively zero. If we're at 50%
+            //      complete, the race is clearly already underway, even if
+            //      the previous-status check passes (some edge cases like
+            //      race-replay rewinds could otherwise slip through).
+            //   3. Existing restoredIntoRacing guard still applies for the
+            //      page-refresh case.
+            const wasPreRace = (oldSt === S.PRE_LAUNCH || oldSt === S.COUNTDOWN);
+            const completionPct = parseFloat(state.completion) || 0;
+            const justStarted = completionPct < 5;
+            if (!restoredIntoRacing && wasPreRace && justStarted) {
                 const tn = state.track !== '—' ? state.track : 'this circuit';
-                pushLine("It's a green light — we are go on " + tn + "!", 'status', ICON.flag);
+                // Per spec v2.87: illegal races use flag wording, legal
+                // races use green-light wording.
+                const startMsg = isIllegalTrack(state.track)
+                    ? "Flag drops \u2014 we are racing on " + tn + "!"
+                    : "It's a green light \u2014 we are go on " + tn + "!";
+                pushLine(startMsg, 'status', ICON.flag);
                 // Per spec v2.83: arm the start-grid window. ambient
                 // dispatch will draw from LINES.RACING.startGrid for the
                 // next few seconds, then revert to normal RACING ambient.
-                // restoredIntoRacing skip means a mid-race page refresh
-                // won't trigger start-grid lines — the race is already
-                // underway and start commentary would read wrong.
                 state.raceStartedAt = Date.now();
                 state.startGridLinesFired = 0;
             }
@@ -3503,6 +3606,70 @@
         } catch (_) {
             pollCountdownCache = '__null__';
             return null;
+        }
+    }
+
+    // Per spec v2.87: parse the pre-launch countdown into a total-seconds
+    // value so the light/flag sequence can hit its 5s/3s/2s/1s marks.
+    // Returns null if no countdown text is found.
+    function scrapeCountdownSeconds () {
+        const text = scrapeCountdown();
+        if (!text) return null;
+        // Examples: "48 seconds", "1 minute 48 seconds", "1 hours, 17 minutes, 10 seconds"
+        let total = 0;
+        const h = text.match(/(\d+)\s*hour/i);
+        const m = text.match(/(\d+)\s*minute/i);
+        const s = text.match(/(\d+)\s*second/i);
+        if (h) total += parseInt(h[1], 10) * 3600;
+        if (m) total += parseInt(m[1], 10) * 60;
+        if (s) total += parseInt(s[1], 10);
+        return total > 0 ? total : null;
+    }
+
+    // Per spec v2.87: drag-race-tree style countdown for legal races, flag-
+    // wave sequence for illegal races. Each line fires once per pre-launch
+    // (tracked in state.lightSeqFired keyed by second marker). Called from
+    // the PRE_LAUNCH ambient dispatch when countdown <= 5s.
+    //
+    // Sequence per spec:
+    //   5s: All Lights Are Lit    / Flag Girl/Guy Is Ready
+    //   3s: Blue Lights Off       / Flag Girl/Guy Raised The Flag
+    //   2s: Amber Lights Off      / Flag Girl/Guy Waves The Flag
+    //   1s: Green Lights Off      / Flag Girl/Guy Drops The Flag / "Start"
+    //
+    // For illegal races, the flag-bearer's gender is decided once per race
+    // (at the 5s mark) and remembered for the rest of the sequence to keep
+    // wording consistent.
+    function fireLightOrFlagSequence (secs) {
+        // Map countdown seconds to the marker we want — only fire on the
+        // exact spec markers, not on intermediate seconds.
+        const marker = (secs === 5 || secs === 3 || secs === 2 || secs === 1) ? secs : null;
+        if (!marker) return;
+        if (state.lightSeqFired[marker]) return;
+        state.lightSeqFired[marker] = true;
+
+        const illegal = isIllegalTrack(state.track);
+        if (illegal) {
+            // Pick gender once per race, remember it for subsequent lines.
+            if (!state.lightSeqFlagBearer) {
+                state.lightSeqFlagBearer = Math.random() < 0.5 ? 'Flag Girl' : 'Flag Guy';
+            }
+            const fb = state.lightSeqFlagBearer;
+            const lines = {
+                5: fb + ' Is Ready',
+                3: fb + ' Raised The Flag',
+                2: fb + ' Waves The Flag',
+                1: fb + ' Drops The Flag \u2014 Start!'
+            };
+            pushLine(lines[marker], 'status', ICON.flag);
+        } else {
+            const lines = {
+                5: 'All Lights Are Lit',
+                3: 'Blue Lights Off',
+                2: 'Amber Lights Off',
+                1: 'Green Lights Off'
+            };
+            pushLine(lines[marker], 'status', ICON.flag);
         }
     }
 
@@ -4423,9 +4590,12 @@
             try {
                 const comps = scrapeRacerCompletions();
                 const n = Object.keys(comps).length;
+                const trackThreshold = getProximityThresholdForTrack(state.track);
+                const thresholdTxt = trackThreshold.toFixed(3) + '%';
                 if (n >= 2) {
                     detail.push('Proximity scrape: completion % detected for '
-                        + n + ' racers (strict 0.1% gating active).');
+                        + n + ' racers (threshold for ' + escH(state.track || '?')
+                        + ': ' + thresholdTxt + ').');
                 } else if (n === 1) {
                     detail.push('Proximity scrape: only 1 racer\u2019s % detected \u2014 '
                         + 'need at least 2 for gap calculation. Proximity messages disabled.');
@@ -4435,6 +4605,24 @@
                 }
             } catch (_) {}
         }
+
+        // Per spec v2.87 TRACK LENGTHS: print per-track close-proximity %
+        // thresholds so the user can verify the scaling. Speedway is the
+        // 0.1% baseline; longer tracks get narrower thresholds, shorter
+        // tracks get wider ones. Sorted by threshold descending so the
+        // most-permissive tracks appear first.
+        try {
+            const trackRows = Object.keys(TRACK_LENGTHS_MI).map(function (t) {
+                return { name: t, len: TRACK_LENGTHS_MI[t], pct: getProximityThresholdForTrack(t) };
+            }).sort(function (a, b) { return b.pct - a.pct; });
+            const trackLines = trackRows.map(function (r) {
+                return escH(r.name) + ' (' + r.len.toFixed(2) + ' mi): '
+                    + r.pct.toFixed(3) + '%';
+            }).join('<br>&bull; ');
+            detail.push('<div style="margin-top:4px;font-size:0.85em;">'
+                + '<b>Track-length close-proximity thresholds:</b><br>&bull; '
+                + trackLines + '</div>');
+        } catch (_) {}
 
         const html = [
             '<div style="color:' + tierColor + ';font-weight:600;margin-bottom:4px;">'
