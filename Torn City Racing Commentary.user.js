@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.80.0
+// @version      2.81.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.80.0';
+    const SCRIPT_VERSION = '2.81.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -2677,10 +2677,17 @@
             const timeEl = row.querySelector('li.time, li[class*="time"]');
             if (!timeEl) return;
             const tText = (timeEl.textContent || '').trim();
-            // Require a colon-separated time. Empty strings, "—", or stray
-            // numbers shouldn't trigger. Accepts 00:00:00 (HH:MM:SS) and
-            // 00:00 (MM:SS) defensively.
-            if (!/^\d{1,2}:\d{2}(:\d{2})?$/.test(tText)) return;
+            // Require a colon-separated time. Per spec v2.81, the actual
+            // format Torn uses is MM:SS.ss (minutes:seconds.hundredths) —
+            // e.g. "02:34.56" for a 2-minute 34.56-second race. The v2.80
+            // regex only accepted colon-separated HH:MM:SS / MM:SS forms,
+            // which is why finisher detection still wasn't firing.
+            // Accepted variants:
+            //   MM:SS.ss      — primary form per spec
+            //   MM:SS         — defensive (some pages may omit hundredths)
+            //   HH:MM:SS      — defensive for long races
+            //   HH:MM:SS.ss   — defensive belt-and-braces
+            if (!/^\d{1,2}:\d{2}(:\d{2})?(\.\d{1,2})?$/.test(tText)) return;
             // Now pull the name. Same defensive selectors as the leaderboard
             // scraper (li.name with possible inner span).
             const nameEl = row.querySelector('li.name > span, li.name, li[class*="name"] > span, li[class*="name"]');
