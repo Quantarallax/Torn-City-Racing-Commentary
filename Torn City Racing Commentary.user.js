@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.87.0
+// @version      2.88.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.87.0';
+    const SCRIPT_VERSION = '2.88.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -1952,6 +1952,17 @@
     function ambientPoolFor (statusLines) {
         if (!statusLines || !Array.isArray(statusLines.ambient)) return [];
         let out = statusLines.ambient;
+        // Per spec v2.88 BUG FIX: characteristic-pool lines are written in
+        // active-racing voice ("the straights are eating up the laps",
+        // "the cars are scrambling for grip") and read wrong when fired
+        // during PRE_LAUNCH where nothing is actually moving yet. Skip the
+        // merge entirely for PRE_LAUNCH — its dedicated pre-race ambient
+        // pool already covers the tension/anticipation theme. Earlier spec
+        // mentioned track-flavour could appear in pre-launch too, but the
+        // current pool isn't worded for that context.
+        if (statusLines === LINES.PRE_LAUNCH) {
+            return out;
+        }
         // Merge tier pool when present on the LINES section (only RACING has tiers).
         const tierKey = getRacerCountTierKey();
         if (tierKey && Array.isArray(statusLines[tierKey]) && statusLines[tierKey].length) {
@@ -2436,7 +2447,11 @@
                 // Only announce if we have a real name (not a dash or empty string)
                 const validRacerName = r.name && r.name !== '—' && r.name.length > 1;
                 if (knownRacerNames.size > 1 && validRacerName) {
-                    const posStr = ordinal(r.posNum || idx + 1);
+                    // Per spec v2.88 BUG FIX: "in position 3rd" reads as a
+                    // grammar error since "position" implies the numeric
+                    // form. Use the plain integer for "in position N" so it
+                    // reads "in position 3".
+                    const posPlain = String(r.posNum || idx + 1);
                     if (currentStatus === S.COUNTDOWN) {
                         pushLine(r.name + ' joins the paddock.', 'status', ICON.join);
                     } else if (currentStatus === S.PRE_LAUNCH) {
@@ -2444,7 +2459,7 @@
                         // three messages, chosen randomly, after a 1-second pause.
                         const arrivalName = r.name;
                         const preLaunchLines = [
-                            arrivalName + ' just joined in position ' + posStr + '.',
+                            arrivalName + ' just joined in position ' + posPlain + '.',
                             arrivalName + ' does a last minute check.',
                             arrivalName + ' looks fidgety behind the wheel.'
                         ];
@@ -2539,18 +2554,21 @@
             }
         }
 
-        if (st === S.PRE_LAUNCH && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
-            // Per spec v2.87: in the last 5 seconds of pre-launch, fire the
-            // light sequence (legal races) or flag sequence (illegal races).
-            // Markers at 5s, 3s, 2s, 1s. Each fires once. The normal start
-            // message gets fired by the PRE_LAUNCH→RACING transition.
-            // We check countdown FIRST so it has priority over normal
-            // pre-launch ambient — the sequence must hit its marks.
+        // Per spec v2.88 BUG FIX: light/flag countdown sequence MUST fire
+        // regardless of how many pre-launch ambient lines have been shown.
+        // The v2.87 placement nested this inside the cap-gated branch, so
+        // once preLaunchMsgCount hit PRE_LAUNCH_MAX (3 ambient lines), the
+        // whole branch stopped running and the 5/3/2/1s sequence was
+        // silently skipped. Hoisted out here, it always gets to run during
+        // PRE_LAUNCH.
+        if (st === S.PRE_LAUNCH) {
             const secs = scrapeCountdownSeconds();
             if (secs !== null && secs <= 5 && secs >= 1) {
                 fireLightOrFlagSequence(secs);
             }
+        }
 
+        if (st === S.PRE_LAUNCH && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
             if (now >= tAmbient) {
                 // Per spec v2.75: track-description-flavoured messages can
                 // appear during PRE_LAUNCH as well as RACING/COUNTDOWN.
@@ -3609,21 +3627,45 @@
         }
     }
 
-    // Per spec v2.87: parse the pre-launch countdown into a total-seconds
-    // value so the light/flag sequence can hit its 5s/3s/2s/1s marks.
-    // Returns null if no countdown text is found.
+    // Per spec v2.87 (improved v2.88): parse the pre-launch countdown into
+    // a total-seconds value so the light/flag sequence can hit its
+    // 5s/3s/2s/1s marks. Returns null if no countdown text is found.
+    //
+    // v2.88 added a defensive fallback: when scrapeCountdown's prefix-
+    // matching regex doesn't find "Race will Start in N seconds" (e.g.
+    // because Torn renders the last few seconds differently — perhaps as
+    // just "N seconds" or no text at all), do a secondary sweep of the
+    // page text for any compact "N second(s)" pattern that appears
+    // standalone. We only trust this fallback when status is PRE_LAUNCH
+    // (the caller's responsibility), since otherwise stray "seconds"
+    // mentions elsewhere on the page could false-trigger.
     function scrapeCountdownSeconds () {
         const text = scrapeCountdown();
-        if (!text) return null;
-        // Examples: "48 seconds", "1 minute 48 seconds", "1 hours, 17 minutes, 10 seconds"
-        let total = 0;
-        const h = text.match(/(\d+)\s*hour/i);
-        const m = text.match(/(\d+)\s*minute/i);
-        const s = text.match(/(\d+)\s*second/i);
-        if (h) total += parseInt(h[1], 10) * 3600;
-        if (m) total += parseInt(m[1], 10) * 60;
-        if (s) total += parseInt(s[1], 10);
-        return total > 0 ? total : null;
+        if (text) {
+            // Parse the structured form from scrapeCountdown
+            let total = 0;
+            const h = text.match(/(\d+)\s*hour/i);
+            const m = text.match(/(\d+)\s*minute/i);
+            const s = text.match(/(\d+)\s*second/i);
+            if (h) total += parseInt(h[1], 10) * 3600;
+            if (m) total += parseInt(m[1], 10) * 60;
+            if (s) total += parseInt(s[1], 10);
+            if (total > 0) return total;
+        }
+        // Defensive secondary sweep — search the live page text for a
+        // standalone seconds value near the racing UI. Caller is
+        // responsible for only calling this in PRE_LAUNCH context.
+        try {
+            const pageText = getPageText();
+            // Look specifically for patterns like "5 seconds" or "3 second"
+            // appearing near "Race" or "Start" context to reduce false hits.
+            const m = pageText.match(/(?:Race|Start|begins?)\D{0,80}?(\d{1,3})\s*seconds?\b/i);
+            if (m) {
+                const v = parseInt(m[1], 10);
+                if (v >= 1 && v <= 600) return v;
+            }
+        } catch (_) {}
+        return null;
     }
 
     // Per spec v2.87: drag-race-tree style countdown for legal races, flag-
