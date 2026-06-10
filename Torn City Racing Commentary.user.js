@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.92.0
+// @version      3.0.3
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.92.0';
+    const SCRIPT_VERSION = '3.0.3';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -699,10 +699,10 @@
                 '{p1name} just hanging on to {p2name} - not letting the gap grow.',
                 'A second or two between {p1name} and {p2name}, but the chase is on.',
                 '{p1name} keeping {p2name} honest. The gap holds steady.',
-                '{p1name} won\\u2019t let {p2name} settle - constant pressure from behind.',
+                '{p1name} won\'t let {p2name} settle - constant pressure from behind.',
                 '{p2name} can see {p1name} in the mirrors. No room to relax.',
                 '{p1name} stalking {p2name} - waiting for the moment to pounce.',
-                'The gap from {p2name} to {p1name} just won\\u2019t open up.',
+                'The gap from {p2name} to {p1name} just won\'t close up.',
                 '{p1name} matching {p2name} sector for sector. A battle brewing.',
                 '{p2name} looking edgy with {p1name} that close behind.'
             ],
@@ -2817,8 +2817,18 @@
                         // between threshold and 5%. Same cooldown bucket
                         // as close-proximity so the two modes don't both
                         // fire for the same pair in quick succession.
+                        // Per spec v3.0.2: "marginally larger than
+                        // proximity percent" - tightened from the v2.92
+                        // 5% absolute cap to 2.5x the track-scaled close
+                        // threshold. So on Speedway (0.1% close-prox), the
+                        // lingering band is (0.1%, 0.25%]; on a long track
+                        // like Withdrawal (0.031% close-prox), it is
+                        // (0.031%, 0.0775%]. Keeps "refusing to drop
+                        // away" lines firmly in tight-battle territory
+                        // rather than across-the-screen gaps.
+                        const lingerCap = threshold * 2.5;
                         const lingerPair = findLingeringPair(
-                            getActiveRacers(), completions, threshold, 5.0
+                            getActiveRacers(), completions, threshold, lingerCap
                         );
                         if (lingerPair) {
                             const key = proximityPairKey(lingerPair.front.name, lingerPair.back.name);
@@ -3660,18 +3670,24 @@
         "Hold onto your hats - {track} just served up a thriller. {player} settled into {pos}, fighting every inch of the way. That, my friends, is why we tune in week after week."
     ];
 
-    // Per spec v2.92: smaller summary pool for small-field races (under 25
-    // racers). The large-field templates above lean into "field of 50" type
-    // grandeur which reads wrong for a quick 4-car sprint. These are pared-
-    // back, single or two-sentence summaries.
+    // Per spec v2.92 (reworked v3.0.3): smaller summary pool for small-
+    // field races (under 25 racers). The large-field templates above lean
+    // into "field of 50" type grandeur which reads wrong for a four-car
+    // scrap. These templates focus on FIELD SIZE only and are deliberately
+    // duration-neutral, since the small-field pool can fire on anything
+    // from a 2-lap sprint to a 100-lap marathon. Race-duration flavour is
+    // injected separately via the {raceShape} token (see pickSummary).
     const OUTRO_SUMMARIES_SMALL = [
-        "A tidy little contest on {track}. {player} finished in {pos}.",
-        "{track} dispatched quickly today. {player} brought it home in {pos}.",
-        "Short and sharp on {track}. {player} took {pos} from a field of {total}.",
-        "A neat scrap on {track}. {player} crosses the line in {pos}.",
-        "Quick work on {track} today. {player} ends up in {pos}.",
-        "{player} sees the chequered flag in {pos} on {track}. A clean little race.",
-        "Compact field, frantic action. {player} secures {pos} on {track}."
+        "A close-quarters affair on {track}. {player} finished in {pos}.",
+        "{raceShape} on {track} with just {total} on the grid. {player} brought it home in {pos}.",
+        "{raceShape} between {total} drivers on {track}. {player} took {pos}.",
+        "An intimate field today on {track}. {player} crosses the line in {pos}.",
+        "Just {total} cars on track, but plenty to fight over. {player} ends up in {pos}.",
+        "{player} sees the chequered flag in {pos} on {track}. Small field, sharp racing.",
+        "A tight {total}-driver contest on {track}. {player} settles into {pos}.",
+        "Compact grid, no shortage of action. {player} secures {pos} on {track}.",
+        "Every position mattered in a {total}-strong field. {player} finishes in {pos} on {track}.",
+        "{total} drivers locked in close combat on {track}. {player} comes home in {pos}."
     ];
 
     // Per spec v2.92: track per-racer position deltas across the race so
@@ -3755,11 +3771,28 @@
             const safePlayer = (state.playerName && state.playerName !== '-' && !NAME_BLACKLIST.test(state.playerName))
                 ? state.playerName : 'The driver';
             const safeTrack = (state.track && state.track !== '-') ? state.track : 'this circuit';
+            // Per spec v3.0.3: race-shape phrase derived from lap count.
+            // Lets the small-field summaries reflect what KIND of race
+            // happened, rather than always implying it was quick.
+            //   1-2 laps    : sprint
+            //   3-15 laps   : short contest
+            //   16-50 laps  : sustained battle
+            //   51+ laps    : marathon
+            // Sentence-starting capitalised form so it slots cleanly at
+            // the start of a template line.
+            const laps = parseInt(state.totalLaps, 10) || 0;
+            let raceShape;
+            if (laps <= 0) raceShape = 'A hard-fought contest';
+            else if (laps <= 2) raceShape = 'A flat-out sprint';
+            else if (laps <= 15) raceShape = 'A short, sharp contest';
+            else if (laps <= 50) raceShape = 'A sustained battle';
+            else raceShape = 'A marathon';
             const base = template
                 .replace(/\{player\}/g, safePlayer)
                 .replace(/\{track\}/g, safeTrack)
                 .replace(/\{pos\}/g, posNum > 0 ? ordinal(posNum) : 'a strong position')
-                .replace(/\{total\}/g, total || '?');
+                .replace(/\{total\}/g, total || '?')
+                .replace(/\{raceShape\}/g, raceShape);
             // Per spec v2.92: append standout, poor, and crash snippets to
             // the base summary. Each can be empty so the summary stays
             // clean when nothing notable happened.
