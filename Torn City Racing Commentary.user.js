@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      2.91.0
+// @version      2.92.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '2.91.0';
+    const SCRIPT_VERSION = '2.92.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -57,15 +57,15 @@
     // Per spec: hit https://api.torn.com/v2/racing/tracks and match the scraped
     // track name against each record's `title`, then use the `description` to
     // flavour ambient commentary. Requires a Torn API key (Public Access tier
-    // is sufficient — track data is public information). The key is stored
+    // is sufficient - track data is public information). The key is stored
     // locally via GM_setValue and NEVER transmitted anywhere except api.torn.com.
     const API_KEY_STORAGE = 'tc_racecomm_api_key';
     const TRACKS_CACHE_STORAGE = 'tc_racecomm_tracks_cache';
-    const TRACKS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week — track data rarely changes
+    const TRACKS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week - track data rarely changes
     // Per spec v2.78: track records and player enlisted cars APIs.
-    // Records are per-track-per-class lap times — refresh once per session
+    // Records are per-track-per-class lap times - refresh once per session
     // is fine (they only change when someone sets a new record). Cars are
-    // per-player attributes — refresh a few times per hour at most so we
+    // per-player attributes - refresh a few times per hour at most so we
     // pick up post-tune-up changes without hammering the API.
     const RECORDS_CACHE_STORAGE = 'tc_racecomm_records_cache';
     const RECORDS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -83,7 +83,7 @@
     // one at random per spec v2.78.
     let carsCache = null;
     let carsFetchInFlight = false;
-    // keyAccessFlags schema: { tracksOK, recordsOK, carsOK } — set after the
+    // keyAccessFlags schema: { tracksOK, recordsOK, carsOK } - set after the
     // first request of each type returns. Helps the settings page describe
     // what's actually working with the current key (vs what we'd expect).
     let keyAccessFlags = { tracksOK: false, recordsOK: false, carsOK: false };
@@ -108,7 +108,7 @@
             + '<polygon points="5.5,1 10,9 1,9" fill="#4ee87a"/></svg></span>',
         down: '<span class="tc-icon"><svg width="11" height="11" viewBox="0 0 11 11" fill="none">'
             + '<polygon points="5.5,10 10,2 1,2" fill="#ff6666"/></svg></span>',
-        // Stopwatch icon for lap-time commentary (per spec v2.65 — orange themed
+        // Stopwatch icon for lap-time commentary (per spec v2.65 - orange themed
         // to match the .fl-lapTime CSS).
         stopwatch: '<span class="tc-icon"><svg width="13" height="13" viewBox="0 0 13 13" fill="none">'
             + '<circle cx="6.5" cy="7.5" r="4.5" stroke="#ff9a3c" stroke-width="1.2"/>'
@@ -164,7 +164,7 @@
     }
 
     // Per spec v2.78: detect when the player is the only racer still on
-    // track — every other non-crashed racer has crossed the finish line.
+    // track - every other non-crashed racer has crossed the finish line.
     // The spec also says "Do not include drivers ahead of the player if
     // they finish the race"; this helper is the trigger for both that
     // suppression and the dedicated lonely-finish commentary pool.
@@ -228,11 +228,11 @@
             // https://api.torn.com/v2/racing/tracks. Only merged into the
             // active pool when getCurrentTrackDescription() returns non-empty.
             apiAmbient: [
-                'For those joining us, {track} — {trackDesc}',
+                'For those joining us, {track} - {trackDesc}',
                 'A reminder for the newcomers: {trackDesc}',
-                'The track guide says it all — {trackDesc}',
+                'The track guide says it all - {trackDesc}',
                 'Worth noting on {track}: {trackDesc}',
-                'They say of {track} — {trackDesc}'
+                'They say of {track} - {trackDesc}'
             ],
             player: [
                 '{player} has settled into {pos} and holds their nerve.',
@@ -257,7 +257,7 @@
             ],
             player: [
                 '{player} poised in {pos}. The launch will be critical.',
-                'Watch {player} — reaction time off the line could be decisive.',
+                'Watch {player} - reaction time off the line could be decisive.',
                 '{player} breathes steady in the {car}. Focused. Ready.',
                 '{player} sits {pos}. Every tenth of a second counts from here.'
             ]
@@ -300,13 +300,13 @@
                 // demands. Templates with these tokens are auto-filtered
                 // out of the pool when no minimal-key data is available.
                 "{player}'s {car} is {carStrength}. Could pay dividends today.",
-                "Watch the {car} — {carStrength}. A real weapon on a track like this.",
+                "Watch the {car} - {carStrength}. A real weapon on a track like this.",
                 "The {car} setup is {carStrength}. {player} ready to make it count.",
-                "It's not just one upgrade that wins races — but {player}'s car is {carStrength}.",
-                "{player} carrying {raceRecord} into this one. Form mattering.",
-                "{player} could be a problem out there — {raceRecord} in this {car}.",
+                "It's not just one upgrade that wins races - but {player}'s car is {carStrength}.",
+                "{player} carrying {raceRecord} into this one. Form and customisation matters.",
+                "{player} could be a problem out there - {raceRecord} in this {car}.",
                 "The {car} has {carWeakness}. Could hurt {player} today.",
-                "Concerns over the {car} — {carWeakness} on a track like this.",
+                "Concerns over the {car} - {carWeakness} on a track like this.",
                 "{carWeakness} for {player}'s {car}. Watch for time loss in the wrong sections.",
                 // Per spec v2.78: record-aware ambient. {recordTime},
                 // {recordHolder}, {recordCar} resolve to top-class records
@@ -314,7 +314,7 @@
                 // no records cached.
                 'Track record here is {recordTime}, set by {recordHolder} in a {recordCar}.',
                 'Anyone wanting to threaten the {recordTime} class record by {recordHolder} has work to do.',
-                'The bar is {recordHolder}\u2019s {recordTime} — set in a {recordCar}.',
+                'The bar is {recordHolder}\u2019s {recordTime} - set in a {recordCar}.',
                 'A reminder: class record on {track} sits at {recordTime}.'
             ],
             // Per spec v2.78: lonely-finish lines, used when the player is
@@ -324,71 +324,150 @@
             // Per spec v2.83: start-of-race lines fired in the first few
             // seconds after RACING begins. Cover launch types (clean, slow,
             // wheelspin), nudges in the pack, and player-focused starts.
-            // These reference the grid/launch — never mid-race action like
-            // "halfway through" or "down the long straight" — because the
+            // These reference the grid/launch - never mid-race action like
+            // "halfway through" or "down the long straight" - because the
             // race has only just got underway.
+            // Per spec v2.92: police-themed ambient lines that only fire
+            // on ILLEGAL races. These mention Torn City crimes the police
+            // are dealing with elsewhere, helicopter overhead, crowd
+            // control, or just absent police. Merged into RACING.ambient
+            // only when the current track is illegal (see ambientPoolFor).
+            police: [
+                'No police around. We are clear, ladies and gentlemen.',
+                'Police scanner indicates they are taking care of a hustling job across town.',
+                'Police scanner crackles - they are on their way to a counterfeiting bust.',
+                'Most of the police force is on their lunch break. Lucky us.',
+                'Police scanner picks up a burglary in progress on the other side of Torn. Not our problem.',
+                'They are dealing with a stagecoach robbery. Eyes off us for now.',
+                'Police are keeping crowd control - we suspect they enjoy the racing too.',
+                'A police helicopter hovers overhead. The pilot waves at the leading car.',
+                'Sirens in the distance - not for us, thankfully.',
+                'Police scanner: a forgery ring just got tipped off. The force is in chaos.',
+                'Local police standing nearby with arms folded, enjoying the show.',
+                'Word is the police union are on strike today. Convenient.',
+                'Police scanner squawks about a vandalism spree downtown.',
+                'A lone constable watches from the kerb. He is grinning.',
+                'A pickpocketing complaint just came in over the scanner. They are taking that one.',
+                'Police helicopter circles, spotlight playing across the pack.',
+                'The boys in blue are at the throwing-the-match investigation. We are safe here.',
+                'No badge in sight. The track belongs to the racers tonight.',
+                'Police radio: a search-for-cash operation just went sideways elsewhere. Distractions are our friend.',
+                'Mounted police drift past. They tip their caps to the leaders.'
+            ],
+
+            // Per spec v2.92: post-launch gradient pools selected based on
+            // the player's starting position in the field. The FIRST start-
+            // grid line each race uses a positional pool reflecting how the
+            // player did off the line. Subsequent start-grid lines (up to
+            // the cap) draw from the generic startGrid pool above.
+            //
+            // Tone tiers:
+            //   1st place           : "amazingly", celebratory
+            //   top 25% (not 1st)   : "perfectly", competent
+            //   middle 50%          : neutral, businesslike
+            //   bottom 25%          : negative, behind
+            //
+            // For small fields (10 or fewer racers), the buckets are
+            // mapped by direct position rather than percentage so the
+            // gradient still has resolution.
+            startGridFirst: [
+                '{player} amazingly times the launch from pole - a perfect getaway!',
+                'An astonishing start by {player} from {pos}. Already opening a gap.',
+                'Pole sitter {player} converts the start into a clear lead.',
+                '{player} bullets off the line from {pos} - what a launch!',
+                'Beautifully timed start by {player}. Holding the lead with authority.',
+                '{player} away cleanly from the front. Everyone has work to do behind.',
+                'A textbook start by {player} from {pos}. The field is already chasing.'
+            ],
+            startGridTopQuarter: [
+                '{player} perfectly times the launch from {pos}.',
+                'A clean, decisive getaway by {player}. Holding station up front.',
+                '{player} away cleanly from {pos} - good position to attack from.',
+                'Looking ready for the fight - {player} executes a tidy start.',
+                '{player} away in good order from {pos}. The attack starts now.',
+                'Strong launch from {player} - the {car} putting the power down well.',
+                '{player} settles into {pos} cleanly. In the mix from the start.'
+            ],
+            startGridMid: [
+                '{player} away in {pos}. A solid, unremarkable start.',
+                'Nothing dramatic from {player} off the line. Position held.',
+                '{player} settles in from {pos}. Long race ahead.',
+                'Steady start for {player}. The work begins now.',
+                '{player} away cleanly from {pos}. Plenty of laps to make moves.',
+                'A workmanlike launch by {player}. Time to find a rhythm.',
+                '{player} stays right where they started. The middle of the pack is busy already.'
+            ],
+            startGridBottomQuarter: [
+                '{player} bogs down on the launch from {pos}. Lots to recover.',
+                'A slow getaway for {player}. Already on the back foot.',
+                'Wheelspin from {player} - the {car} struggling to put power down.',
+                'Not the launch {player} wanted from {pos}. Tough start.',
+                '{player} hesitates on the line. The chase begins immediately.',
+                'A scrappy start for {player} from {pos}. Long way to recover.',
+                '{player} caught napping at the lights. Bad way to begin the day.'
+            ],
             startGrid: [
                 'Lightning start from {leader}! Straight into the lead.',
-                'Clean getaway for {leader} — holding position into turn one.',
+                'Clean getaway for {leader} - holding position into turn one.',
                 '{leader} bogs down on the launch! {p2} sneaks past.',
                 'Wheelspin from {leader}! That\u2019s a tenth or two lost already.',
-                '{p2} times the launch perfectly — instant move on {leader}.',
-                'Bad start for {p2} — hesitates at the line.',
+                '{p2} times the launch perfectly - instant move on {leader}.',
+                'Bad start for {p2} - hesitates at the line.',
                 'Nudges and bumps in the pack as the cars get away.',
                 'Drama in the midfield! Smoke at the back of the grid.',
                 'Side-by-side launches all down the front row.',
-                'The whole pack jumps as one — heads straight for the first corner.',
+                'The whole pack jumps as one - heads straight for the first corner.',
                 'A slow start for some of the back-row cars. Lots to recover.',
                 '{leader} gets the jump and everyone is left chasing.',
                 '{player} times the launch nicely in the {car}.',
-                '{player} struggles off the line — slow start in the {car}.',
+                '{player} struggles off the line - slow start in the {car}.',
                 'Off they go! Engines screaming as the field gets up to speed.',
                 'Clean start across the field. No drama on the launch.',
                 'Carnage at the start! Cars all over the place.',
-                'A bit of a fumble for {p3} on the launch — slipping back.',
+                'A bit of a fumble for {p3} on the launch - slipping back.',
                 '{p2} just edges {leader} off the line! What a getaway.',
                 'Everyone away cleanly. Now the racing begins.'
             ],
             lonelyFinish: [
-                'Just {player} now — everyone else home and showered.',
+                'Just {player} now - everyone else home and showered.',
                 'A long lonely road to the line for {player}.',
                 '{player} the only car still circulating. Just have to bring it home.',
                 'The crowd is starting to drift away. {player} still out there grinding.',
                 'Nothing for company but the engine noise. {player} laps to the finish.',
                 'A processional finish for {player}. Just complete the laps and pick up the points.',
-                'No mirrors needed — {player} is the last one on track.',
+                'No mirrors needed - {player} is the last one on track.',
                 'The chequered flag is ready and waiting. {player} just needs to get there.',
-                'No traffic, no overtakes — just {player} and the road.',
+                'No traffic, no overtakes - just {player} and the road.',
                 '{player} working alone now. Smooth and consistent will do the job.'
             ],
-            // API-flavoured RACING ambient — uses {trackDesc} from the Torn
+            // API-flavoured RACING ambient - uses {trackDesc} from the Torn
             // tracks endpoint, merged into the active pool only when the
             // description has been fetched and cached.
             apiAmbient: [
-                'Remember this is {track} — {trackDesc}',
+                'Remember this is {track} - {trackDesc}',
                 'For those tuning in late: {trackDesc}',
-                '{track} demands respect. As the briefing puts it — {trackDesc}',
-                'Worth bearing in mind on {track} — {trackDesc}',
-                'Every driver here knows what {track} can do — {trackDesc}'
+                '{track} demands respect. As the briefing puts it - {trackDesc}',
+                'Worth bearing in mind on {track} - {trackDesc}',
+                'Every driver here knows what {track} can do - {trackDesc}'
             ],
             // Tier-specific ambient pools, gated by state.racerCount. The tier
             // boundaries (2-6, 7-15, 16-50, 51-75, 76-100) come from the spec
             // section "NUMBER OF RACERS AFFECTS TYPE OF MESSAGES SHOWN". Each
-            // tier captures the FEEL of a race of that size — space, noise,
-            // grit, visibility — and mixes those flavour notes into commentary.
+            // tier captures the FEEL of a race of that size - space, noise,
+            // grit, visibility - and mixes those flavour notes into commentary.
             tierTiny: [
                 // 2-6: quiet, plenty of space
-                'Plenty of room out there — almost a private session.',
+                'Plenty of room out there - almost a private session.',
                 'A quiet field today. Each driver has space to breathe.',
                 'Just a handful of cars, and you can hear every engine note.',
-                'No traffic to fight — pure driving on display.',
+                'No traffic to fight - pure driving on display.',
                 'With so few entries, every overtake matters double.',
                 'A sparse grid means clean lines and clear sightlines.'
             ],
             tierSmall: [
                 // 7-15: filling up, less space
                 'Field starting to fill up. Less space, more drama.',
-                'The pack tightens — overtaking gets trickier from here.',
+                'The pack tightens - overtaking gets trickier from here.',
                 'Mid-sized field, and you can feel the pressure building.',
                 'Enough cars now that every corner has a queue.',
                 'Drivers having to pick their gaps carefully.',
@@ -396,27 +475,27 @@
             ],
             tierMedium: [
                 // 16-50: lots of cars, noisier, smellier
-                'A busy track today — the noise is something to hear.',
+                'A busy track today - the noise is something to hear.',
                 'Lots of metal out there. The smell of fuel and rubber is heavy.',
-                'Plenty of cars in the mix — space at a premium.',
+                'Plenty of cars in the mix - space at a premium.',
                 'The growl of all those engines together is a special sound.',
-                'A proper field — and a proper racket from the grandstands.',
+                'A proper field - and a proper racket from the grandstands.',
                 'Fuel fumes hang thick over the track. This is racing.'
             ],
             tierLarge: [
                 // 51-75: lots of cars, mud/grit flying, hard to see
-                'Mud and grit flying up — visibility is becoming a real problem.',
-                'A huge field — and you can barely see through the windscreen.',
+                'Mud and grit flying up - visibility is becoming a real problem.',
+                'A huge field - and you can barely see through the windscreen.',
                 'Cars stacked up everywhere. Mud spraying from every wheel.',
                 'Drivers will be wiping grit from their visors at every straight.',
                 'Wall-to-wall cars and a windscreen full of debris.',
-                'Vying for space at every turn — and a face full of muck.'
+                'Vying for space at every turn - and a face full of muck.'
             ],
             tierMassive: [
                 // 76-100: total carnage
                 'Absolute carnage out there! Cars everywhere!',
                 'The whole grid is one big rolling traffic jam.',
-                'Slowing down, speeding up, slowing down again — chaos.',
+                'Slowing down, speeding up, slowing down again - chaos.',
                 'Smelly, noisy, and frankly exciting. This is what racing is.',
                 'Mud and grit flying like confetti at a wedding.',
                 'Can the drivers even see? Visibility is non-existent.',
@@ -427,7 +506,7 @@
             // every lap from lap 2 onwards. On each lap the script picks one
             // pool by priority: average > comparison > basic.
             //   - lapTimeBasic (default):  "{player} completes lap N in TT".
-            //     Used for the majority of laps — the every-lap baseline.
+            //     Used for the majority of laps - the every-lap baseline.
             //   - lapTimeFaster/Slower/Same (comparison): used at cadenced
             //     intervals (50-100 laps → every 8-12, 2-49 laps → every 2-6).
             //   - lapTimeAverage / lapTimeAverageFirst: every 2-4 laps from
@@ -435,7 +514,7 @@
             //     (no previous average to compare against); subsequent ones
             //     use lapTimeAverage and reference the change vs the
             //     previously-reported average ("3s down on the last reading").
-            //     Has higher priority than comparison — if both cadences hit
+            //     Has higher priority than comparison - if both cadences hit
             //     the same lap, the average line wins.
             // Tokens used:
             //   {lapTime}        = just-completed lap time (e.g. "00:27")
@@ -446,64 +525,64 @@
             //                      previous reported average, e.g.
             //                      "2s down on last average" or
             //                      "3s slower than last average". Empty when
-            //                      no prior reading or when level — the
+            //                      no prior reading or when level - the
             //                      "level" case uses dedicated templates
             //                      from lapTimeAverageLevel instead.
             lapTimeBasic: [
                 '{player} completes lap {lapNum} in {lapTime}.',
                 'A {lapTime} for {player} on lap {lapNum}. Steady work.',
-                'Lap {lapNum} done — {lapTime} for {player}.',
+                'Lap {lapNum} done - {lapTime} for {player}.',
                 "{player}'s last lap: {lapTime}. Lap {lapNum} on the board.",
                 'Through lap {lapNum} in {lapTime}. {player} keeping the rhythm.',
                 'That was {lapTime} for {player}. Lap {lapNum} ticked off.',
                 '{player} clocks {lapTime} for lap {lapNum}. Holding {pos}.',
-                'Lap {lapNum} in {lapTime} — {player} on the move.',
+                'Lap {lapNum} in {lapTime} - {player} on the move.',
                 '{lapTime} on the boards for {player}. Lap {lapNum} complete.',
                 'A {lapTime} from {player} that time. Lap {lapNum} done.',
                 'Splits show {player} round in {lapTime} for lap {lapNum}.',
                 '{player} crosses the line for lap {lapNum}. {lapTime}.',
-                'Another lap down for {player} — {lapTime} on lap {lapNum}.',
+                'Another lap down for {player} - {lapTime} on lap {lapNum}.',
                 '{lapTime} this time for {player}. Working on lap {lapNum} now.'
             ],
             lapTimeFaster: [
-                "{player} chops {delta}s off the previous lap — {lapTime} for lap {lapNum}.",
-                "Quicker by {delta}s — {player} round in {lapTime} on lap {lapNum}.",
+                "{player} chops {delta}s off the previous lap - {lapTime} for lap {lapNum}.",
+                "Quicker by {delta}s - {player} round in {lapTime} on lap {lapNum}.",
                 "{lapTime} for {player} on lap {lapNum}. That's {delta}s up on the previous tour.",
                 "A {delta}-second improvement for {player}. Lap {lapNum} in {lapTime}.",
-                "Pace stepping up — {player} {delta}s quicker, lap {lapNum} in {lapTime}.",
+                "Pace stepping up - {player} {delta}s quicker, lap {lapNum} in {lapTime}.",
                 "{player} finds another {delta}s. Lap {lapNum} clocked at {lapTime}.",
-                "Sharper through the turns — {lapTime} for {player}, {delta}s faster on lap {lapNum}.",
+                "Sharper through the turns - {lapTime} for {player}, {delta}s faster on lap {lapNum}.",
                 "{player} putting the hammer down: {lapTime}, {delta}s up on the last one.",
                 // Per spec v2.78: record-aware variants. {recordGap} resolves
                 // to phrases like "only 1.2 seconds off the track record" or
                 // "a new track record". When no record cached, {recordGap}
-                // renders empty — these templates fall through to other pools
+                // renders empty - these templates fall through to other pools
                 // via the pickLine recent-blocklist on empty render.
-                "{player} {delta}s up on the last one — {recordGap}.",
+                "{player} {delta}s up on the last one - {recordGap}.",
                 "Lap {lapNum} in {lapTime} for {player}, {recordGap}.",
-                "{lapTime} that time — {player} {recordGap}!"
+                "{lapTime} that time - {player} {recordGap}!"
             ],
             lapTimeSlower: [
-                "{player} loses {delta}s that lap — {lapTime} for lap {lapNum}.",
-                "Slower by {delta}s — {lapTime} for {player} on lap {lapNum}.",
+                "{player} loses {delta}s that lap - {lapTime} for lap {lapNum}.",
+                "Slower by {delta}s - {lapTime} for {player} on lap {lapNum}.",
                 "Tyres starting to talk? {player} drops {delta}s, lap {lapNum} in {lapTime}.",
                 "{lapTime} for {player} on lap {lapNum}. That's {delta}s down on the previous one.",
-                "Pace easing for {player} — {delta}s slower, lap {lapNum} clocked at {lapTime}.",
-                "{player} can't match the last one — {lapTime}, {delta}s shy of pace.",
+                "Pace easing for {player} - {delta}s slower, lap {lapNum} clocked at {lapTime}.",
+                "{player} can't match the last one - {lapTime}, {delta}s shy of pace.",
                 "A {delta}-second drop for {player} on lap {lapNum}. {lapTime} on the boards."
             ],
             lapTimeSame: [
-                "{player} stays on the pace — {lapTime} for lap {lapNum}, near-identical to the last.",
+                "{player} stays on the pace - {lapTime} for lap {lapNum}, near-identical to the last.",
                 "Metronomic stuff from {player}. {lapTime} again, lap {lapNum} done.",
                 "{player} matches the previous lap to within a whisker. {lapTime} on lap {lapNum}.",
-                "Same time, different lap — {lapTime} for {player} on lap {lapNum}.",
-                "Consistency on display — {player} round in {lapTime} for lap {lapNum}."
+                "Same time, different lap - {lapTime} for {player} on lap {lapNum}.",
+                "Consistency on display - {player} round in {lapTime} for lap {lapNum}."
             ],
             lapTimeAverage: [
                 // Compared to the previous reported average. {avgComparison}
                 // expands to a pre-formatted phrase like "2s down on last
                 // average" or "3s slower than last average". Per spec v2.68
-                // these are NOT used when the new average is level — see the
+                // these are NOT used when the new average is level - see the
                 // dedicated lapTimeAverageLevel pool below.
                 "Running average {avgTime} for {player}. {avgComparison}.",
                 "{player}'s race average now {avgTime}. {avgComparison}.",
@@ -514,7 +593,7 @@
                 "Race-average for {player} reads {avgTime}. {avgComparison}.",
                 "{player}'s pace average shifts to {avgTime}. {avgComparison}."
             ],
-            // Level case — the running average is unchanged (within 0.5s) of
+            // Level case - the running average is unchanged (within 0.5s) of
             // the previous reading. Per spec v2.68 the wording is dedicated:
             // "Running average MM:SS for {player}. Level with previous update."
             lapTimeAverageLevel: [
@@ -547,7 +626,7 @@
                 '{player} carries good speed {trackFlavour}.',
                 '{player} attacks {trackFlavour}, holding the racing line.',
                 'Holding {pos}, {player} threads neatly {trackFlavour}.',
-                '{player} pushes hard {trackFlavour} — full commitment in the {car}.',
+                '{player} pushes hard {trackFlavour} - full commitment in the {car}.',
                 'Watch {player} {trackFlavour}. They\'re finding tenths there.'
             ],
             funny: [
@@ -560,33 +639,33 @@
             ],
             moverUp: [
                 '{mover} moves from {moverFrom} to {moverTo}! Charging through the field.',
-                'Excellent move from {mover} — {moverFrom} to {moverTo}!',
+                'Excellent move from {mover} - {moverFrom} to {moverTo}!',
                 '{mover} surges forward, {moverFrom} to {moverTo}.',
                 'Position gained! {mover} moves from {moverFrom} to {moverTo}.',
                 '{mover} makes a brilliant move, from {moverFrom} to {moverTo}.',
                 'Up goes {mover}! From {moverFrom} to {moverTo} in a flash.',
                 // Per spec v2.76: weave track-description flavour into the
                 // overtake calls so they feel anchored to the actual track.
-                '{mover} makes the move {trackFlavour} — {moverFrom} to {moverTo}!',
-                'Brilliant pass {trackFlavour} for {mover} — {moverFrom} to {moverTo}.'
+                '{mover} makes the move {trackFlavour} - {moverFrom} to {moverTo}!',
+                'Brilliant pass {trackFlavour} for {mover} - {moverFrom} to {moverTo}.'
             ],
             moverDownEngine: [
-                '{faller} drops from {fallerFrom} to {fallerTo} — looks like engine trouble.',
+                '{faller} drops from {fallerFrom} to {fallerTo} - looks like engine trouble.',
                 'Engine issues for {faller}! Sliding from {fallerFrom} to {fallerTo}.',
                 '{faller} loses ground fast, {fallerFrom} to {fallerTo}. That engine sounds rough.',
-                'Mechanical grief for {faller} — dropping from {fallerFrom} to {fallerTo}.'
+                'Mechanical grief for {faller} - dropping from {fallerFrom} to {fallerTo}.'
             ],
             moverDownTyre: [
-                '{faller} moves down from {fallerFrom} to {fallerTo} — tyre trouble suspected.',
+                '{faller} moves down from {fallerFrom} to {fallerTo} - tyre trouble suspected.',
                 'Tyre problems for {faller}! From {fallerFrom} to {fallerTo} and falling.',
                 '{faller} struggles with rubber, sliding from {fallerFrom} to {fallerTo}.',
                 'A blowout for {faller}? Dropping from {fallerFrom} to {fallerTo}.'
             ],
             moverDownMiscalc: [
-                '{faller} drops from {fallerFrom} to {fallerTo} — a costly miscalculation.',
-                'Poor decision from {faller} — {fallerFrom} to {fallerTo} and regretting it.',
+                '{faller} drops from {fallerFrom} to {fallerTo} - a costly miscalculation.',
+                'Poor decision from {faller} - {fallerFrom} to {fallerTo} and regretting it.',
                 '{faller} misjudges the corner, dropping from {fallerFrom} to {fallerTo}.',
-                'A miscalculation from {faller} — sliding back from {fallerFrom} to {fallerTo}.'
+                'A miscalculation from {faller} - sliding back from {fallerFrom} to {fallerTo}.'
             ],
             moverDown: [
                 '{faller} moves down from {fallerFrom} to {fallerTo}. Losing ground.',
@@ -595,10 +674,10 @@
                 '{faller} under pressure, dropping from {fallerFrom} to {fallerTo}.'
             ],
             proximity: [
-                '{p1name} coming very close to {p2name} — side by side through the sector!',
+                '{p1name} coming very close to {p2name} - side by side through the sector!',
                 'Intense battle between {p1name} and {p2name}. Barely a car width between them.',
                 '{p1name} right on the bumper of {p2name}. This is going to get interesting.',
-                'Wheel to wheel action — {p1name} and {p2name} are inseparable right now.',
+                'Wheel to wheel action - {p1name} and {p2name} are inseparable right now.',
                 '{p1name} and {p2name} locked in a fierce duel. Neither gives an inch.',
                 'The crowd on their feet as {p1name} and {p2name} go door to door.',
                 '{p1name} scrapes metal, {p2name} swerves with the impact.',
@@ -606,29 +685,47 @@
                 // Per spec v2.76: weave track-description flavour into
                 // proximity calls so duels feel rooted in the actual track.
                 '{p1name} and {p2name} side by side {trackFlavour}!',
-                'Door to door {trackFlavour} — {p1name} and {p2name} won\'t give an inch.',
+                'Door to door {trackFlavour} - {p1name} and {p2name} won\'t give an inch.',
                 '{p1name} tries the move on {p2name} {trackFlavour}. Brave stuff!'
             ],
-            // These lines reference {p3} — ONLY used when racerCount >= 3
+            // Per spec v2.92: "refusing to drop away" / lingering-proximity
+            // lines. These fire when the gap between adjacent racers is
+            // LARGER than the close-proximity threshold but still within
+            // (threshold + 5%) - i.e. the chaser is in touch but not in
+            // attacking position. {p1name} is the chaser, {p2name} is the
+            // defender (same convention as proximity).
+            proximityLingering: [
+                '{p1name} refusing to drop away from {p2name}. Still in striking distance.',
+                '{p1name} just hanging on to {p2name} - not letting the gap grow.',
+                'A second or two between {p1name} and {p2name}, but the chase is on.',
+                '{p1name} keeping {p2name} honest. The gap holds steady.',
+                '{p1name} won\\u2019t let {p2name} settle - constant pressure from behind.',
+                '{p2name} can see {p1name} in the mirrors. No room to relax.',
+                '{p1name} stalking {p2name} - waiting for the moment to pounce.',
+                'The gap from {p2name} to {p1name} just won\\u2019t open up.',
+                '{p1name} matching {p2name} sector for sector. A battle brewing.',
+                '{p2name} looking edgy with {p1name} that close behind.'
+            ],
+            // These lines reference {p3} - ONLY used when racerCount >= 3
             position3: [
                 'Current order: {leader} leads, {p2} in 2nd, {p3} in 3rd.',
                 '{leader} out front, {p2} on their tail, {p3} watching closely.',
-                'Top three right now — {leader}, {p2}, {p3}. All very close.',
+                'Top three right now - {leader}, {p2}, {p3}. All very close.',
                 '{leader} leads from {p2} and {p3}. Every lap a new story.',
                 'Midfield carnage behind {leader}. {p2} and {p3} fighting hard.'
             ],
-            // These lines only mention 2 players — safe for any racer count
+            // These lines only mention 2 players - safe for any racer count
             position2: [
                 '{leader} out front with {p2} right behind. This is tense.',
                 '{leader} holds the lead but {p2} applies relentless pressure.',
                 '{p2} presses hard on {leader}. Every corner a potential overtake.',
                 '{leader} still leads, {p2} refusing to drop away.',
                 // Per spec v2.75: when the field is small (≤5 racers) the
-                // "at the back" framing reads oddly — there's nowhere to BE
+                // "at the back" framing reads oddly - there's nowhere to BE
                 // at the back of. Reference their position ordinal instead.
                 // For larger fields, "at the back" / "in last position" is
                 // fine. The {lastDesc} token resolves accordingly.
-                '{last} {lastDesc} — but races can change in an instant on {track}.'
+                '{last} {lastDesc} - but races can change in an instant on {track}.'
             ]
         }
     };
@@ -636,13 +733,13 @@
     // ─── State ────────────────────────────────────────────────────────────────────
     let state = {
         status: S.MENU,
-        playerName: '—',
-        track: '—',
-        car: '—',
-        position: '—',
+        playerName: '-',
+        track: '-',
+        car: '-',
+        position: '-',
         // When the user clicks another racer in Torn's race list, their name goes
         // here. The display (NAME/CAR/POS) then tracks that racer until focus is
-        // cleared. Empty string / null means no focus override — show real player.
+        // cleared. Empty string / null means no focus override - show real player.
         focusedName: '',
         focusedCar: '',
         focusedPosition: '',
@@ -663,8 +760,8 @@
         prevRacers: [],
         finishers: [],
         outroShown: false,
-        lastLap: '—',
-        currentLap: '—',
+        lastLap: '-',
+        currentLap: '-',
         // prevLapNumber: the lap number we last saw on this race. Used to
         // detect transitions to a new lap so we can fire lap-time commentary
         // (see LINES.RACING.lapTime). Resets to 0 on new race entry. Per spec
@@ -684,17 +781,17 @@
         // new race entry (which means: roll a fresh target on the first lap
         // transition).
         nextLapMsgAt: 0,
-        // Per spec v2.67: average lap-time messages have their own cadence —
+        // Per spec v2.67: average lap-time messages have their own cadence -
         // every 2-4 laps starting from lap 5. nextAvgLapAt is the next lap at
         // which an average message will fire (0 = not yet scheduled).
         nextAvgLapAt: 0,
-        // Previous average lap time (in seconds) — used to compute the
+        // Previous average lap time (in seconds) - used to compute the
         // running-vs-previous comparison shown in average commentary. 0 means
         // "no previous average recorded yet"; first average message just
         // states the current value.
         lastAvgSec: 0,
-        completion: '—',
-        // Fix Button removed in v2.62 — windowFixed is no longer used but
+        completion: '-',
+        // Fix Button removed in v2.62 - windowFixed is no longer used but
         // remains as a placeholder to keep persisted-state compatibility with
         // older versions. Always false, never read by behaviour code.
         windowFixed: false,
@@ -711,7 +808,7 @@
         preLaunchMsgCount: 0,
         // Per spec v2.83: track when RACING first activated so the start-
         // grid commentary pool fires only for the first few seconds. Both
-        // session-only — race-entry reset clears them. We don't persist
+        // session-only - race-entry reset clears them. We don't persist
         // these because a page refresh during a race shouldn't replay the
         // start-grid lines (we're already underway).
         raceStartedAt: 0,
@@ -722,17 +819,17 @@
         lightSeqFired: {}
     };
 
-    // commentaryPaused — session only, never persisted. Manual via the Pause button.
+    // commentaryPaused - session only, never persisted. Manual via the Pause button.
     let commentaryPaused = false;
 
-    // replayPausedAuto — session only. Set true when a RACE_REPLAY is paused
+    // replayPausedAuto - session only. Set true when a RACE_REPLAY is paused
     // by Torn itself (page text "Race paused") and cleared when "Race
     // replaying" appears. Independent of commentaryPaused so a manual pause
     // toggle isn't disturbed by auto-pause state, and vice versa. The pause
     // filter (see pushLine) treats either flag as "paused".
     let replayPausedAuto = false;
 
-    // Timers — session only, never persisted
+    // Timers - session only, never persisted
     let tAmbient = 0;
     let tPlayer = 0;
     let tPosition = 0;
@@ -743,13 +840,13 @@
 
     // Throttle slider (per spec v2.73): a 0-100 slider next to the Pause
     // button controls how dense the commentary is during RACING/RACE_REPLAY.
-    //   0   = "Less" — only player-related messages get through (everything
+    //   0   = "Less" - only player-related messages get through (everything
     //         else is suppressed). Ambient messages still pass.
-    //   100 = "All"  — every line passes (no throttling).
+    //   100 = "All"  - every line passes (no throttling).
     //   In between, non-player non-ambient lines are gated by a time-based
     //   probability: higher slider value → shorter gap between messages.
     // Persisted to GM storage so the user's preference survives reload.
-    // Throttle is INDEPENDENT of racer count (per spec — explicitly do NOT
+    // Throttle is INDEPENDENT of racer count (per spec - explicitly do NOT
     // throttle based on number of racers). The old big-race throttle from
     // v2.63 has been removed in favour of this user-controlled mechanism.
     const THROTTLE_STORAGE_KEY = 'tc_racecomm_throttle';
@@ -767,7 +864,7 @@
     // and track-description char-pool ("every other ambient message"). This
     // counter increments on each ambientPoolFor() call that has a char-pool
     // available, and the parity decides which pool to draw from. Session-only
-    // — resets to 0 on page load, which is fine because the alternation is
+    // - resets to 0 on page load, which is fine because the alternation is
     // about ambient density not strict ordering across sessions.
     let ambientAlternator = 0;
 
@@ -781,14 +878,14 @@
     let feedLines = [];
     let knownFinishers = new Set();
     let knownRacerNames = new Set();
-    // Racers we have already announced as crashed — prevents repeat messages
+    // Racers we have already announced as crashed - prevents repeat messages
     // for the same player. Reset on every new race entry.
     let otherCrashedNames = new Set();
     let currentStatus = S.MENU;
     let clearedForStatus = null;
     let isMinimised = false;
 
-    // Consecutive polls that have seen "not enough drivers" — requires 2 to confirm WAITING.
+    // Consecutive polls that have seen "not enough drivers" - requires 2 to confirm WAITING.
     // Resets to 0 the moment any other status is detected, preventing stuck WAITING.
     let waitingSeenCount = 0;
 
@@ -796,7 +893,7 @@
     // getPageText() is expensive: it clones the entire document.body, queries
     // and removes overlay nodes, and extracts innerText. Called 11+ times per
     // poll tick from various scrapers, this allocated dozens of megabytes per
-    // second — the root cause of the >2GB tab memory growth reported. Solution:
+    // second - the root cause of the >2GB tab memory growth reported. Solution:
     // cache the result for the duration of one poll tick. invalidatePollCache()
     // is called at the top of each poll() so consumers within the same tick
     // share a single computation, but a stale cache cannot survive past it.
@@ -868,14 +965,14 @@
 
     // Fetch the racing tracks list from the Torn v2 API. Idempotent: if a
     // request is already in flight we don't fire another. On success the cache
-    // is updated. Failures are silent — the script falls back to its built-in
+    // is updated. Failures are silent - the script falls back to its built-in
     // commentary pool, so the user notices nothing if the API is unreachable
     // or the key is invalid.
     function fetchTracksFromApi () {
         if (tracksFetchInFlight) return;
         const key = getApiKey();
         if (!key) return;
-        // GM_xmlhttpRequest is the Tampermonkey cross-origin XHR — works
+        // GM_xmlhttpRequest is the Tampermonkey cross-origin XHR - works
         // around CORS so a script on torn.com can call api.torn.com.
         if (typeof GM_xmlhttpRequest !== 'function') return;
         tracksFetchInFlight = true;
@@ -925,7 +1022,7 @@
     // ─── Track records cache (per spec v2.78) ────────────────────────────────
     // Records are keyed by '<trackId>-<class>' so we can hold records for
     // multiple tracks simultaneously (useful when player switches between
-    // races within one session). TTL of 6 hours — records rarely change.
+    // races within one session). TTL of 6 hours - records rarely change.
 
     function loadRecordsCache () {
         try {
@@ -947,13 +1044,13 @@
 
     // Fetch records for a specific (trackId, class) combination. Idempotent:
     // if a fetch is already in flight for that key we don't fire another.
-    // Records endpoint is public — works with public OR minimal key.
+    // Records endpoint is public - works with public OR minimal key.
     function fetchTrackRecords (trackId, carClass) {
         if (!trackId || !carClass) return;
         const cacheKey = trackId + '-' + carClass;
         if (recordsFetchInFlight[cacheKey]) return;
         if (!recordsCache) recordsCache = loadRecordsCache() || { fetchedAt: Date.now(), byKey: {} };
-        // Already have it (and not expired) — skip.
+        // Already have it (and not expired) - skip.
         if (recordsCache.byKey[cacheKey]) return;
         const key = getApiKey();
         if (!key) return;
@@ -1013,7 +1110,7 @@
         const recs = recordsCache.byKey[cacheKey].records;
         if (!recs || !recs.length) return null;
         // The API returns records sorted ascending by lap_time, but don't
-        // rely on that — find the min explicitly.
+        // rely on that - find the min explicitly.
         let best = recs[0];
         for (let i = 1; i < recs.length; i++) {
             if (recs[i].lap_time < best.lap_time) best = recs[i];
@@ -1066,7 +1163,7 @@
                         const json = JSON.parse(resp.responseText || '{}');
                         if (json.error) {
                             // Public-key holders will hit a permission error
-                            // here — that's expected, not a script bug.
+                            // here - that's expected, not a script bug.
                             console.warn('[TC Race Commentary] enlistedcars API error:', json.error);
                             return;
                         }
@@ -1100,7 +1197,7 @@
             return null;
         }
         const cur = (state.car || '').trim().toLowerCase();
-        if (!cur || cur === '—') return null;
+        if (!cur || cur === '-') return null;
         const matches = [];
         for (let i = 0; i < carsCache.cars.length; i++) {
             const c = carsCache.cars[i];
@@ -1111,7 +1208,7 @@
         return matches[Math.floor(Math.random() * matches.length)];
     }
 
-    // Player car class — used to drive both record-class lookup and the
+    // Player car class - used to drive both record-class lookup and the
     // attribute classification scale. Returns 'A'..'E' or null. Falls back
     // to 'A' if minimal-key data isn't available but we still want a
     // reasonable default for record fetching (the records endpoint requires
@@ -1172,10 +1269,10 @@
     // trimmed), or null if not present. Triggers a background refresh if the
     // cache is missing/stale.
     function getTrackInfo (title) {
-        if (!title || title === '—') return null;
+        if (!title || title === '-') return null;
         if (!tracksCache) tracksCache = loadTracksCache();
         if (!tracksCache) {
-            // No cache — fire a fetch, but return null right now (the next
+            // No cache - fire a fetch, but return null right now (the next
             // poll will benefit from the fresh data).
             fetchTracksFromApi();
             return null;
@@ -1192,7 +1289,7 @@
 
     // Get the current track's description string from the API cache, or '' if
     // unavailable. Used by fill() to expand the {trackDesc} token. Per spec,
-    // the full description text is rate-limited to once every 20 minutes —
+    // the full description text is rate-limited to once every 20 minutes -
     // see fullDescAllowed() below. Templates that don't quote the full text
     // (e.g. characteristic-derived flavour lines) are not rate-limited.
     function getCurrentTrackDescription () {
@@ -1217,7 +1314,7 @@
     // traits. Per spec v2.76, tuned against the actual Torn /v2/racing/tracks
     // descriptions so each Torn track resolves to meaningful tags. Dead pools
     // (gravel/sand/ice) have been removed as those words don't appear in any
-    // Torn description. New tags added for the actual phrasing Torn uses —
+    // Torn description. New tags added for the actual phrasing Torn uses -
     // "rally", "straights", "hairpins", "razor sharp", "slalom", "bridges",
     // factories/power plants, financial/shopping districts, jail, peninsula,
     // lake, bay/coast, and so on. The detection also picks up driving-style
@@ -1253,7 +1350,7 @@
     const SPEEDWAY_LENGTH_MI = TRACK_LENGTHS_MI.Speedway;
 
     // Returns the close-proximity % threshold for a given track name.
-    // Falls back to 0.1% if the track isn't in the table (defensive — the
+    // Falls back to 0.1% if the track isn't in the table (defensive - the
     // map covers all 16 currently in-game tracks but Torn may add more).
     //
     // Formula: threshold% = 0.1 × (L_speedway / L_track)
@@ -1273,12 +1370,12 @@
     // only proper sanctioned circuit; everything else is an illegal street
     // race even if the track surface is tarmac.
     //
-    // The spec says "use track description to work this out" — we infer
+    // The spec says "use track description to work this out" - we infer
     // from track characteristic tags which derive from API descriptions.
     // The 'legendary' tag fires on Speedway uniquely. Falls back to
     // illegal=true for unknown tracks since the vast majority are illegal.
     function isIllegalTrack (trackName) {
-        if (!trackName || trackName === '\u2014') return true;
+        if (!trackName || trackName === '-') return true;
         // Speedway is the one Torn-sanctioned circuit.
         if (trackName === 'Speedway') return false;
         // All other tracks in Torn are illegal street/industrial races.
@@ -1292,16 +1389,16 @@
         const tags = {};
 
         // ─ SURFACE ──
-        // Mud / off-road / rally / dirt — spec expanded per v2.76. The Torn
+        // Mud / off-road / rally / dirt - spec expanded per v2.76. The Torn
         // descriptions use "rally", "off-road", "dirt road/path/section",
         // and "rally tires" rather than the word "mud", so we cast wide.
         if (/\bmud\b|\bmuddy\b|\bdirt\b|\boff[- ]?road\b|\brally\b|\brally\s+tires?\b|\brally\s+tyres?\b/.test(desc)) {
             tags.mud = true;
         }
-        // Tarmac — spec expanded per v2.76. Torn descriptions never use the
+        // Tarmac - spec expanded per v2.76. Torn descriptions never use the
         // word "tarmac" directly, but many proxies are reliable. Also catches
-        // "race track" (Stone Park), "water treatment plant" (Sewage —
-        // industrial = paved), "power plant" (Meltdown — also paved). These
+        // "race track" (Stone Park), "water treatment plant" (Sewage -
+        // industrial = paved), "power plant" (Meltdown - also paved). These
         // tracks are all tarmac per the community guides even though the
         // description doesn't say so explicitly.
         if (/\btarmac\b|\basphalt\b|\bsmooth\b|\bpaved\b|\bspeedway\b|\bstreet\s+race\b|\bcircuit\b|\bofficial\s+raceway\b|\brace\s+track\b|\bwater\s+treatment\s+plant\b|\bpower\s+plant\b/.test(desc)) {
@@ -1310,8 +1407,8 @@
         // Inferential tarmac: per spec "Create a routine which is clever
         // enough to infer from track descriptions what the racing would be
         // like". A track without explicit dirt/rally wording but with
-        // hallmarks of a paved surface — long straights at high speed, 90-
-        // degree bends, hairpins — is almost certainly tarmac. Catches
+        // hallmarks of a paved surface - long straights at high speed, 90-
+        // degree bends, hairpins - is almost certainly tarmac. Catches
         // Docks, which the explicit regex misses (no "tarmac" / "circuit"
         // in its description, just "sprint through the docks").
         if (!tags.mud && !tags.tarmac
@@ -1322,7 +1419,7 @@
 
         // ─ LAYOUT / FEATURES ──
         if (/\bnarrow\b/.test(desc)) tags.narrow = true;
-        // "tight" is ambiguous — "tight corners" implies a narrow/twisty
+        // "tight" is ambiguous - "tight corners" implies a narrow/twisty
         // layout, but "few tight corners" implies the opposite. Only tag
         // narrow when "tight" appears WITHOUT a preceding "few"/"no"/"without".
         if (/\btight\b/.test(desc) && !/\b(few|no|without|lack\s+of|lacks?)\s+(\w+\s+){0,2}tight\b/.test(desc)) {
@@ -1339,7 +1436,7 @@
         if (/\bbend|\bcorner|\bslalom\b/.test(desc) && /\bvast\s+array\b|\bvariety\b|\barray\b/.test(desc)) {
             tags.varied = true;
         }
-        // Oval — require standalone words. "loops around the bay" should NOT
+        // Oval - require standalone words. "loops around the bay" should NOT
         // match (it's just a transitive verb, not describing an oval). Match
         // "oval", "circular", or "speedway" (Torn's official speedway IS the
         // classic oval per community track guides).
@@ -1354,7 +1451,7 @@
         if (/\bforest\b|\btree\b|\bwood\b|\bscenic\b/.test(desc)) tags.forest = true;
         if (/\bcity\b|\burban\b|\bstreet\b|\bdistrict\b/.test(desc)) tags.city = true;
         if (/\bcountry\b|\brural\b|\bfarm\b|\bfield\b|\bpark\b/.test(desc)) tags.country = true;
-        // Bridges / water / coast — Withdrawal, Two Islands, Hammerhead, Meltdown
+        // Bridges / water / coast - Withdrawal, Two Islands, Hammerhead, Meltdown
         if (/\bbridge|\bbay\b|\bcoast\b|\bsea\b|\bisland|\blake\b|\bpeninsula\b|\bwater\b/.test(desc)) {
             tags.water = true;
         }
@@ -1406,7 +1503,7 @@
     // `tag` is a key produced by getTrackCharacteristics() and `lines` are
     // matching flavour messages. ambientPoolFor merges in lines for all
     // active tags. These are NOT gated by the 20-min throttle since they
-    // don't quote the full description text — they're flavour lines derived
+    // don't quote the full description text - they're flavour lines derived
     // from inferred characteristics.
     //
     // DEAD POOLS REMOVED in v2.76 (per spec: "remove dead pools of types of
@@ -1422,12 +1519,12 @@
         // ─── SURFACE ──
         { tag: 'mud', lines: [
             'Mud sprays in every direction. Drivers fighting for grip.',
-            'The mud is doing the talking — cars sliding everywhere.',
+            'The mud is doing the talking - cars sliding everywhere.',
             'Tyres caked in mud. Steering inputs need to be smoother than ever.',
             'A car comes past, its bodywork barely visible under the mud.',
             'Mechanics will be cursing tonight. Every panel coated in filth.',
             'Mud flicks up off the rear wheels in great brown arcs.',
-            'Visibility through the screen is almost zero — wipers earning their keep.',
+            'Visibility through the screen is almost zero - wipers earning their keep.',
             'One bad line and the mud will eat your race.',
             'The racing line is a thin strip of slightly less mud than the rest.',
             'Lap times suffering badly out there. The mud is a great leveller.',
@@ -1435,69 +1532,69 @@
             'Rally-spec setup is the only thing keeping these cars pointing forward.',
             'Off-road sections eating into the laps. Tyres choosing the line, not the drivers.',
             'A rally car would be in heaven here. Everything else is in trouble.',
-            'Sliding under acceleration, sliding under braking — that is rally driving.'
+            'Sliding under acceleration, sliding under braking - that is rally driving.'
         ]},
         { tag: 'tarmac', lines: [
             'Smooth tarmac means the fast cars are in their element.',
             'On this surface, grip is consistent and lap times tumble.',
-            'Tarmac like a billiard table — no excuses for slow times.',
+            'Tarmac like a billiard table - no excuses for slow times.',
             'Cars are hooked up beautifully on this surface.',
-            'You can hear the tyres squealing — that grip you only get on good tarmac.',
+            'You can hear the tyres squealing - that grip you only get on good tarmac.',
             'Setup matters everywhere, but on tarmac the differences really show.',
             'Drivers can lean on the tyres here. The grip is there to be used.',
-            'A surface that rewards precision — and punishes the timid.',
+            'A surface that rewards precision - and punishes the timid.',
             'On a circuit like this, every lap should be within a tenth.',
             'Quality tarmac under the wheels. The grip is consistent everywhere.',
-            'A proper racing surface — drivers can attack every corner with confidence.',
+            'A proper racing surface - drivers can attack every corner with confidence.',
             'No excuses on a tarmac circuit. Lap times tell the truth.'
         ]},
 
         // ─── LAYOUT / FEATURES ──
         { tag: 'narrow', lines: [
-            'Tight, narrow track — no margin for error here.',
+            'Tight, narrow track - no margin for error here.',
             'Two abreast is a luxury on this circuit.',
             'The walls feel like they\'re closing in.',
             'Overtaking opportunities are rarer than diamonds out there.',
-            'A circuit that demands respect — there is nowhere to hide.'
+            'A circuit that demands respect - there is nowhere to hide.'
         ]},
         { tag: 'wide', lines: [
             'Wide enough to take a real run at it. Drivers using every inch.',
             'Lots of space to set up overtakes here.',
             'Open layout suits the brave.',
-            'Three abreast through some corners — there is room if you commit.',
+            'Three abreast through some corners - there is room if you commit.',
             'The width of this track lets drivers be creative with their lines.'
         ]},
         { tag: 'straights', lines: [
             'Those long straights are eating up the laps.',
-            'Top speed matters here — and the slipstream is in play.',
+            'Top speed matters here - and the slipstream is in play.',
             'Down the long straight and the engines are absolutely howling.',
             'Plenty of running room down the straights. Slipstream battles brewing.',
             'A track that rewards a strong straight-line car.',
-            'The straights here are a chance to draw breath — and pick a passing place.'
+            'The straights here are a chance to draw breath - and pick a passing place.'
         ]},
         { tag: 'hairpins', lines: [
             'The hairpins are where this race will be won or lost.',
             'Through the hairpin, brakes glowing red, drivers wrestling the cars round.',
-            'Hairpin entry — the latest brakers gain a place every lap.',
+            'Hairpin entry - the latest brakers gain a place every lap.',
             'Anyone who gets the hairpin wrong is going to find a wall.'
         ]},
         { tag: 'rightAngles', lines: [
-            'Those 90-degree bends are unforgiving — brake too late and you are off.',
+            'Those 90-degree bends are unforgiving - brake too late and you are off.',
             'The right-angle turns are sapping all the speed from the long straights.',
-            'Sharp corner exits — traction matters more than top speed.'
+            'Sharp corner exits - traction matters more than top speed.'
         ]},
         { tag: 'sharpCorners', lines: [
             'Razor-sharp corners catching out anyone who oversteps the mark.',
-            'A circuit full of sharp corners — every braking zone a potential incident.',
+            'A circuit full of sharp corners - every braking zone a potential incident.',
             'The sharpness of these corners is brutal on tyres.'
         ]},
         { tag: 'softBends', lines: [
-            'Smooth, flowing bends here — drivers can carry serious speed.',
+            'Smooth, flowing bends here - drivers can carry serious speed.',
             'The soft bends reward those who keep momentum.',
-            'Easy on the steering, hard on the throttle — these gentle bends suit the brave.'
+            'Easy on the steering, hard on the throttle - these gentle bends suit the brave.'
         ]},
         { tag: 'twisty', lines: [
-            'Corner after corner — no time to breathe.',
+            'Corner after corner - no time to breathe.',
             'A test of patience as much as speed. The lines are everything.',
             'The drivers earning every metre through these twists.',
             'Steering wheels rarely sit straight on a layout like this.',
@@ -1505,95 +1602,95 @@
             'Get one corner wrong and the next three are compromised.'
         ]},
         { tag: 'varied', lines: [
-            'No two corners the same here — every braking zone needs a different approach.',
+            'No two corners the same here - every braking zone needs a different approach.',
             'The variety of bends keeps the drivers honest. No autopilot on this track.',
             'A real menu of corner types out there. The complete driver gets rewarded.'
         ]},
         { tag: 'oval', lines: [
-            'Round and round we go — oval racing is its own discipline.',
+            'Round and round we go - oval racing is its own discipline.',
             'Constant right-handers mean uneven tyre wear.',
             'On an oval, the slipstream is king.'
         ]},
         { tag: 'hilly', lines: [
             'Elevation changes make this one a real challenge.',
-            'A blind crest — the brave commit, the rest lift.',
+            'A blind crest - the brave commit, the rest lift.',
             'Going downhill, the brakes are taking a hammering.',
-            'Climbing through the gears on the uphill drag — drivers leaning forward.',
+            'Climbing through the gears on the uphill drag - drivers leaning forward.',
             'Drivers cresting the rise and reaching for the brakes almost in the same moment.'
         ]},
 
         // ─── ENVIRONMENT / LOCATION ──
         { tag: 'industrial', lines: [
-            'Industrial backdrop adds to the atmosphere — and the smell.',
+            'Industrial backdrop adds to the atmosphere - and the smell.',
             'Factory walls echo the engine noise back twice as loud.',
             'Steel and concrete on every side. No room for sightseeing.',
             'The clatter of industry mixes with the bark of the exhausts.',
-            'Warehouse roofs, chimneys, machinery — a track with a working backdrop.',
-            'Chemical plants either side — fumes and engine noise blending together.'
+            'Warehouse roofs, chimneys, machinery - a track with a working backdrop.',
+            'Chemical plants either side - fumes and engine noise blending together.'
         ]},
         { tag: 'docks', lines: [
             'The dock cranes loom overhead. A unique stage for racing.',
             'Salt air, diesel fumes, and the roar of engines.',
             'You can almost taste the sea between corners.',
             'Shipping containers stacked like grandstands either side.',
-            'The smell of fuel and brine — there is nowhere quite like racing at the docks.'
+            'The smell of fuel and brine - there is nowhere quite like racing at the docks.'
         ]},
         { tag: 'forest', lines: [
             'Trees lining the track turn it into a tunnel of green.',
-            'Branches overhead, leaves on the line — a different kind of hazard.',
+            'Branches overhead, leaves on the line - a different kind of hazard.',
             'The forest absorbs some of the noise. Almost peaceful, almost.',
-            'A wildlife sighting between corners — they have got used to the noise.',
+            'A wildlife sighting between corners - they have got used to the noise.',
             'Sun and shadow flicker through the canopy at racing speed.'
         ]},
         { tag: 'city', lines: [
-            'Concrete walls and street furniture — nowhere to put a wheel wrong.',
+            'Concrete walls and street furniture - nowhere to put a wheel wrong.',
             'Urban racing at its most uncompromising.',
             'Manhole covers and kerbs to think about as well as the corners.',
             'Painted lines on the road become hazards in the wet.',
             'The buildings funnel the noise straight back at the crowd.'
         ]},
         { tag: 'country', lines: [
-            'Rolling countryside as a backdrop. Beautiful — and quick.',
+            'Rolling countryside as a backdrop. Beautiful - and quick.',
             'Hedgerows and farm gates flicker past at racing speed.',
             'Out in the country, the only sound is engine noise and the occasional sheep.',
             'Through the park, the trees blurring past at racing speed.'
         ]},
         { tag: 'water', lines: [
-            'Glimpses of water between the corners — a striking backdrop.',
+            'Glimpses of water between the corners - a striking backdrop.',
             'The bay glittering in the distance as the cars thunder past.',
             'Spectators along the waterfront getting the best view in town.'
         ]},
         { tag: 'bridges', lines: [
-            'Across the bridges, the cars compress together — overtaking gets risky here.',
+            'Across the bridges, the cars compress together - overtaking gets risky here.',
             'Those old bridges are a real bottleneck. Watch for contact.',
-            'The bridges look ready to give up at any moment — racing across them takes nerve.',
+            'The bridges look ready to give up at any moment - racing across them takes nerve.',
             'Crossing the bridge, the cars\' suspension thumping over the joins.'
         ]},
         { tag: 'islands', lines: [
-            'Looping round the islands — the layout twists in ways nobody expects.',
+            'Looping round the islands - the layout twists in ways nobody expects.',
             'The island section is where the brave drivers find time on the rest.',
             'Slingshotting around the coastline of the islands at full noise.'
         ]},
         { tag: 'lake', lines: [
             'The lake mirrors the sky as the cars flick past at speed.',
             'Round the lake the spray from the leading cars hangs in the air.',
-            'The little island in the middle of the lake — connected by those creaking bridges.'
+            'The little island in the middle of the lake - connected by those creaking bridges.'
         ]},
         { tag: 'powerPlant', lines: [
             'Round the cooling towers, the cars briefly out of sight from the crowd.',
             'Engines roaring under the shadow of the power plant funnels.',
             'A peninsula track with the power station looming over every corner.',
-            'Spectators near the funnels covering their ears — the noise is unbearable.'
+            'Spectators near the funnels covering their ears - the noise is unbearable.'
         ]},
         { tag: 'waterTreatment', lines: [
-            'Round the water treatment plant — not the most glamorous backdrop.',
+            'Round the water treatment plant - not the most glamorous backdrop.',
             'The smell out here is something else. Drivers happy to keep windows up.',
             'Every corner here brings a different surprise.'
         ]},
         { tag: 'jail', lines: [
-            'Past the entrance of the jail — the inmates probably have the best view in town.',
+            'Past the entrance of the jail - the inmates probably have the best view in town.',
             'Sirens from the jail mixing with the engine noise. Atmospheric stuff.',
-            'Racing past the prison walls — the irony of an illegal race not lost on anyone.'
+            'Racing past the prison walls - the irony of an illegal race not lost on anyone.'
         ]},
         { tag: 'financial', lines: [
             'Through the financial district, glass towers reflecting the cars back at us.',
@@ -1601,37 +1698,37 @@
             'The financial district makes for a glamorous, if unlikely, racing backdrop.'
         ]},
         { tag: 'shopping', lines: [
-            'Round the shopping district — shoppers running for cover.',
+            'Round the shopping district - shoppers running for cover.',
             'The shop fronts blurring past at racing speeds.',
             'A street circuit through the high street. The shoppers are not amused.'
         ]},
         { tag: 'freight', lines: [
             'A real risk of meeting a freight truck round the next bend.',
-            'Heavy goods vehicles still using these roads — adds a hazard you won\'t find on a real circuit.',
+            'Heavy goods vehicles still using these roads - adds a hazard you won\'t find on a real circuit.',
             'Anyone who finds a lorry on the racing line is having a bad day.'
         ]},
         { tag: 'illegal', lines: [
-            'This is unlicensed racing at its finest — no rules, no mercy.',
+            'This is unlicensed racing at its finest - no rules, no mercy.',
             'Marshalls? On a track like this? The drivers police themselves.',
-            'An illegal street race — the police know but turn a blind eye.'
+            'An illegal street race - the police know but turn a blind eye.'
         ]},
         { tag: 'upmarket', lines: [
             'The richer districts make a fine backdrop for engine noise and rubber smoke.',
             'Residents of these expensive houses are not getting any sleep tonight.',
-            'High-end streetlights and manicured verges — and 100mph race cars.'
+            'High-end streetlights and manicured verges - and 100mph race cars.'
         ]},
 
         // ─── CHARACTER / DIFFICULTY HINTS ──
         { tag: 'brutal', lines: [
             'A track that punishes mistakes. Every driver knows it.',
-            'Unforgiving circuit — one error and the race is over.',
+            'Unforgiving circuit - one error and the race is over.',
             'Brutal layout, brutal consequences.',
             'No second chances on a circuit like this.',
             'The wall is never far away. The drivers know it.',
             'One wrong move out there will end your race in spectacular fashion.'
         ]},
         { tag: 'fast', lines: [
-            'High-speed running here — engines screaming at their limit.',
+            'High-speed running here - engines screaming at their limit.',
             'Top gear most of the lap. This is flat-out stuff.',
             'Cars blasting past so fast the crowd feels the wind.',
             'The straights are eating up the laps. Speeds nudging the limit.',
@@ -1639,20 +1736,20 @@
             'Pure speed is what wins here. No hiding place for the under-powered.'
         ]},
         { tag: 'technical', lines: [
-            'A technical circuit — the drivers who do their homework get rewarded.',
+            'A technical circuit - the drivers who do their homework get rewarded.',
             'Lap times here come from precision, not bravery.',
             'Every corner has a specific entry, apex, and exit. No improvising.',
             'The setup work pays off on a track this demanding.'
         ]},
         { tag: 'balanced', lines: [
-            'A track that needs everything — speed, handling, braking, acceleration.',
+            'A track that needs everything - speed, handling, braking, acceleration.',
             'No single weakness can be hidden on a balanced circuit.',
             'The all-rounder cars come into their own out there.',
             'Drivers without a complete skillset will be exposed today.'
         ]},
         { tag: 'legendary', lines: [
-            'A legendary stretch of tarmac — every racer wants their name on its record board.',
-            'Designed by racing professionals — and it shows in every corner.',
+            'A legendary stretch of tarmac - every racer wants their name on its record board.',
+            'Designed by racing professionals - and it shows in every corner.',
             'The "perfect track" some have called it. Hard to disagree.',
             'Few places carry the racing history that this one does.'
         ]},
@@ -1662,7 +1759,7 @@
             'Acceleration drivers are licking their lips at the look of this track.'
         ]},
         { tag: 'handlingFocus', lines: [
-            'This is a handling track — the wheel does more work than the throttle.',
+            'This is a handling track - the wheel does more work than the throttle.',
             'Quick steering and confident car placement win out here.',
             'Pure horsepower is no help on a track that demands handling.'
         ]},
@@ -1677,7 +1774,7 @@
             'Long laps, long races, plenty of time for plot twists.'
         ]},
         { tag: 'short', lines: [
-            'A short track means traffic is constant — lapped cars from lap two onwards.',
+            'A short track means traffic is constant - lapped cars from lap two onwards.',
             'On a layout this short, even the smallest error costs places.',
             'The brevity of the lap makes setup adjustments hard to dial in.'
         ]}
@@ -1702,13 +1799,13 @@
             if (!raw) return;
             const p = JSON.parse(raw);
             state.status = p.status || S.MENU;
-            state.playerName = p.playerName || '—';
+            state.playerName = p.playerName || '-';
             // Defensive: if a previous version persisted a UI-label as the player
             // name (e.g. "Position" from a faulty scrape), drop it so we re-scrape.
-            if (NAME_BLACKLIST.test(state.playerName)) state.playerName = '—';
-            state.track = p.track || '—';
-            state.car = p.car || '—';
-            state.position = p.position || '—';
+            if (NAME_BLACKLIST.test(state.playerName)) state.playerName = '-';
+            state.track = p.track || '-';
+            state.car = p.car || '-';
+            state.position = p.position || '-';
             state.focusedName = p.focusedName || '';
             state.focusedCar = p.focusedCar || '';
             state.focusedPosition = p.focusedPosition || '';
@@ -1718,15 +1815,15 @@
             state.prevRacers = p.racers || [];
             state.finishers = p.finishers || [];
             state.outroShown = p.outroShown || false;
-            state.lastLap = p.lastLap || '—';
-            state.currentLap = p.currentLap || '—';
+            state.lastLap = p.lastLap || '-';
+            state.currentLap = p.currentLap || '-';
             state.prevLapNumber = p.prevLapNumber || 0;
             state.lapTimesSec = Array.isArray(p.lapTimesSec) ? p.lapTimesSec.slice(-200) : [];
             state.totalLaps = p.totalLaps || 0;
             state.nextLapMsgAt = p.nextLapMsgAt || 0;
             state.nextAvgLapAt = p.nextAvgLapAt || 0;
             state.lastAvgSec = p.lastAvgSec || 0;
-            state.completion = p.completion || '—';
+            state.completion = p.completion || '-';
             state.windowFixed = p.windowFixed || false;
             state.windowLeft = p.windowLeft || '';
             state.windowTop = p.windowTop || '';
@@ -1738,7 +1835,7 @@
             state.preLaunchMsgCount = p.preLaunchMsgCount || 0;
             feedLines = p.feedLines || [];
             // Scrub any persisted feed lines from previous versions that contain
-            // the "Position has joined..." class of bug — i.e. lines that begin
+            // the "Position has joined..." class of bug - i.e. lines that begin
             // with a known UI-label word followed by a verb. These are stale
             // entries from older script versions where a faulty name scrape let
             // a UI label leak into the message; they re-appear on every refresh
@@ -1820,11 +1917,11 @@
     // data is unavailable.
     //
     // Optional tokens with their availability check:
-    //   {recordGap}   — needs cached records AND a lap time recorded
-    //   {recordTime}, {recordHolder}, {recordCar} — need cached records
-    //   {carStrength}, {carWeakness} — need cached enlistedcars
-    //   {raceRecord}  — needs cached enlistedcars
-    //   {trackDesc}   — needs cached track descriptions
+    //   {recordGap}   - needs cached records AND a lap time recorded
+    //   {recordTime}, {recordHolder}, {recordCar} - need cached records
+    //   {carStrength}, {carWeakness} - need cached enlistedcars
+    //   {raceRecord}  - needs cached enlistedcars
+    //   {trackDesc}   - needs cached track descriptions
     function filterAvailableTemplates (pool) {
         if (!Array.isArray(pool) || !pool.length) return pool;
         const haveRecord = !!getTopTrackRecord();
@@ -1835,7 +1932,7 @@
         // Per spec v2.83/v2.86: once finishers thin out the field, racer-slot
         // tokens ({leader}, {p2}, {p3}, {last}) can resolve to em-dash
         // because the active racer count drops. Filter such templates out
-        // instead of letting them render "{leader} leads from — and —."
+        // instead of letting them render "{leader} leads from - and -."
         // Use the ACTIVE count (excluding finishers) since v2.86: finishers
         // stay in state.racers for leaderboard display, but the racer-slot
         // tokens resolve via getActiveRacers().
@@ -1850,14 +1947,14 @@
             // needs 2, {p3} needs 3. {last} needs at least 1 (and is
             // meaningfully different from {leader} only when 2+ racers
             // are present). All these tokens resolve via state.racers,
-            // which is filtered by excludeCrashed() — so racerCount here
+            // which is filtered by excludeCrashed() - so racerCount here
             // is the live count of still-racing drivers, exactly what we
             // want for the no-em-dash check.
             if (/\{p3\}/.test(tpl) && racerCount < 3) return false;
             if (/\{p2\}/.test(tpl) && racerCount < 2) return false;
             if (/\{leader\}/.test(tpl) && racerCount < 1) return false;
             // {last} is only meaningful as a distinct concept when there
-            // are at least 2 racers — otherwise {last} === {leader} and
+            // are at least 2 racers - otherwise {last} === {leader} and
             // the line reads like a tautology.
             if (/\{last\}/.test(tpl) && racerCount < 2) return false;
             return true;
@@ -1866,7 +1963,7 @@
 
     function pickLine (pool, typeKey) {
         const filtered = filterAvailableTemplates(pool);
-        // If filtering removed everything, fall back to the original pool —
+        // If filtering removed everything, fall back to the original pool -
         // better to render with a missing token than to skip the message
         // entirely. This shouldn't happen in practice because we only filter
         // pools that mix gated and non-gated lines.
@@ -1898,16 +1995,16 @@
     //   - tier pool (RACING only): tier-specific flavour lines keyed by
     //     racer-count band (2-6 / 7-15 / 16-50 / 51-75 / 76-100).
     // Without an API key or before the cache populates, this returns just the
-    // built-in ambient plus the relevant tier — so the commentary degrades
+    // built-in ambient plus the relevant tier - so the commentary degrades
     // gracefully and the user notices no difference if the API is unavailable.
     // ─── Lap-time helpers ─────────────────────────────────────────────────────────
     // Parse a "MM:SS" or "M:SS" or "SS" lap-time string into seconds. Returns
-    // 0 on parse failure rather than throwing — caller treats 0 as "unknown".
+    // 0 on parse failure rather than throwing - caller treats 0 as "unknown".
     function parseLapTimeToSeconds (s) {
         if (!s || typeof s !== 'string') return 0;
         const trimmed = s.trim();
         if (!trimmed) return 0;
-        // "MM:SS" or "M:SS" — most common Torn format
+        // "MM:SS" or "M:SS" - most common Torn format
         const m1 = trimmed.match(/^(\d+):(\d{1,2})$/);
         if (m1) return parseInt(m1[1], 10) * 60 + parseInt(m1[2], 10);
         // Plain seconds e.g. "27" or "27.4"
@@ -1918,7 +2015,7 @@
 
     // Format a seconds value back as "MM:SS" for display in commentary.
     function formatSecondsAsLapTime (sec) {
-        if (!sec || sec <= 0) return '—';
+        if (!sec || sec <= 0) return '-';
         const mins = Math.floor(sec / 60);
         const secs = Math.round(sec % 60);
         const padded = secs < 10 ? '0' + secs : '' + secs;
@@ -1956,12 +2053,20 @@
         // active-racing voice ("the straights are eating up the laps",
         // "the cars are scrambling for grip") and read wrong when fired
         // during PRE_LAUNCH where nothing is actually moving yet. Skip the
-        // merge entirely for PRE_LAUNCH — its dedicated pre-race ambient
-        // pool already covers the tension/anticipation theme. Earlier spec
-        // mentioned track-flavour could appear in pre-launch too, but the
-        // current pool isn't worded for that context.
+        // merge entirely for PRE_LAUNCH - its dedicated pre-race ambient
+        // pool already covers the tension/anticipation theme.
         if (statusLines === LINES.PRE_LAUNCH) {
             return out;
+        }
+        // Per spec v2.92: merge the police pool into RACING ambient when
+        // the current track is illegal. This adds Torn-themed flavour
+        // (police elsewhere, helicopter overhead, scanner chatter) that
+        // only makes sense for street races. Legal sanctioned races skip
+        // this merge.
+        if (statusLines === LINES.RACING
+            && Array.isArray(statusLines.police)
+            && isIllegalTrack(state.track)) {
+            out = out.concat(statusLines.police);
         }
         // Merge tier pool when present on the LINES section (only RACING has tiers).
         const tierKey = getRacerCountTierKey();
@@ -1971,7 +2076,7 @@
         // Per spec v2.76: track-description ambient lines should be used
         // "every other ambient message". We achieve this by toggling a
         // module-level counter on each call. On even ticks (when char-pool
-        // available), return ONLY the char-pool — the picker will then draw
+        // available), return ONLY the char-pool - the picker will then draw
         // exclusively from track-description-flavoured lines for that turn.
         // On odd ticks, return the base+tier mix without the char-pool. The
         // result is a near-perfect 50/50 alternation in practice.
@@ -1981,7 +2086,7 @@
         if (charPool.length) {
             ambientAlternator++;
             if (ambientAlternator % 2 === 0) {
-                // Return char-pool ONLY for this draw — alternation step.
+                // Return char-pool ONLY for this draw - alternation step.
                 // The 20-min apiAmbient (full-description verbatim) is still
                 // gated below, but we don't merge it here on alternation
                 // turns since the char-pool is the source for this tick.
@@ -2002,34 +2107,34 @@
     function fill (tpl, extras) {
         // Defensive: if state.playerName is somehow the placeholder dash, empty,
         // or a UI-label word, fall back to a generic word rather than letting
-        // bad data render in commentary. This is belt-and-braces — the scraper
-        // and entry-message guards already filter at source — but covers any
+        // bad data render in commentary. This is belt-and-braces - the scraper
+        // and entry-message guards already filter at source - but covers any
         // late-arriving template call before name detection has settled.
-        const safePlayer = (state.playerName && state.playerName !== '—'
+        const safePlayer = (state.playerName && state.playerName !== '-'
             && !NAME_BLACKLIST.test(state.playerName))
             ? state.playerName : 'The driver';
         const vars = Object.assign({
             player: safePlayer,
-            track: state.track !== '—' ? state.track : 'the circuit',
-            car: state.car !== '—' ? state.car : 'their car',
+            track: state.track !== '-' ? state.track : 'the circuit',
+            car: state.car !== '-' ? state.car : 'their car',
             pos: ordinal(parseInt(state.position, 10) || 0),
             // Per spec v2.86: token tokens for racer slots use active racers
             // (excluding crashed and finishers) so commentary doesn't say
             // "Jim leads from Bob" when Jim is already in the pits. The
-            // leaderboard display keeps showing finishers though — that's
+            // leaderboard display keeps showing finishers though - that's
             // rendered from state.racers directly elsewhere.
-            leader: (function () { const a = getActiveRacers(); return a[0] ? a[0].name : '—'; })(),
-            p2: (function () { const a = getActiveRacers(); return a[1] ? a[1].name : '—'; })(),
-            p3: (function () { const a = getActiveRacers(); return a[2] ? a[2].name : '—'; })(),
-            last: (function () { const a = getActiveRacers(); return a.length > 0 ? a[a.length - 1].name : '—'; })(),
-            // {lastDesc} — describes the last-place racer's position phrasing.
+            leader: (function () { const a = getActiveRacers(); return a[0] ? a[0].name : '-'; })(),
+            p2: (function () { const a = getActiveRacers(); return a[1] ? a[1].name : '-'; })(),
+            p3: (function () { const a = getActiveRacers(); return a[2] ? a[2].name : '-'; })(),
+            last: (function () { const a = getActiveRacers(); return a.length > 0 ? a[a.length - 1].name : '-'; })(),
+            // {lastDesc} - describes the last-place racer's position phrasing.
             // Per spec v2.75:
-            //   field ≤5: use their ordinal position ("in 5th") — "at the
+            //   field ≤5: use their ordinal position ("in 5th") - "at the
             //             back" reads as filler when there are only a handful
             //             of cars to be at the back of.
             //   field >5: a random pick between "at the back" and "in last
-            //             position" — both read naturally in larger fields.
-            // Per spec v2.86: use active count, not total field — finishers
+            //             position" - both read naturally in larger fields.
+            // Per spec v2.86: use active count, not total field - finishers
             // shouldn't count toward "back of the pack" calculation.
             lastDesc: (function () {
                 const n = getActiveRacers().length;
@@ -2051,7 +2156,7 @@
             countdown: scrapeCountdown() || 'a few moments',
             // {trackDesc} comes from the Torn v2 API /racing/tracks endpoint
             // matched by title. Empty string if no API key set or not yet
-            // cached — template lines that use this should be authored to
+            // cached - template lines that use this should be authored to
             // remain readable even with an empty value, or be gated to only
             // appear when the description is available.
             trackDesc: getCurrentTrackDescription(),
@@ -2059,9 +2164,9 @@
             // {lapTime} resolves to the most recent lastLap, {lapNum} to the
             // lap number that lapTime corresponds to (i.e. the lap that was
             // just completed). Used by LINES.RACING.lapTime templates.
-            lapTime: (state.lastLap && state.lastLap !== '—') ? state.lastLap : 'a respectable time',
+            lapTime: (state.lastLap && state.lastLap !== '-') ? state.lastLap : 'a respectable time',
             lapNum: state.prevLapNumber > 0 ? state.prevLapNumber : '?',
-            // {delta} — absolute seconds difference between the two most
+            // {delta} - absolute seconds difference between the two most
             // recent recorded laps. Used by the lapTimeFaster/lapTimeSlower
             // templates. Renders to '?' when there aren't at least two laps
             // on record (so the template stays grammatical even if something
@@ -2073,21 +2178,21 @@
                 // Show as a clean integer if within 0.05, else 1dp.
                 return d < 1 ? d.toFixed(1) : Math.round(d);
             })(),
-            // {avgTime} — running average of all recorded lap times so far,
+            // {avgTime} - running average of all recorded lap times so far,
             // formatted as MM:SS. Used by the lapTimeAverage templates.
             avgTime: (function () {
                 const arr = state.lapTimesSec;
-                if (!arr.length) return '—';
+                if (!arr.length) return '-';
                 let total = 0;
                 for (let i = 0; i < arr.length; i++) total += arr[i];
                 return formatSecondsAsLapTime(total / arr.length);
             })(),
-            // {avgComparison} — pre-formatted phrase comparing the current
+            // {avgComparison} - pre-formatted phrase comparing the current
             // running average to the previously-reported one. Per spec v2.77:
             //   faster: "2s down on last average"
             //   slower: "3s slower than last average"
             // (no leading sign, suffix "s" on the number, no trailing full
-            // stop — the template adds it). Empty string when there's no
+            // stop - the template adds it). Empty string when there's no
             // prior reading or when the diff is too small (caller should
             // pick a "level with" template instead).
             avgComparison: (function () {
@@ -2101,13 +2206,13 @@
                 // Round to nearest integer for the headline number.
                 const absRound = Math.round(Math.abs(diff));
                 if (diff < 0) {
-                    // Got faster — "2s down on last average".
+                    // Got faster - "2s down on last average".
                     return absRound + 's down on last average';
                 }
-                // Got slower — "3s slower than last average".
+                // Got slower - "3s slower than last average".
                 return absRound + 's slower than last average';
             })(),
-            // {trackFlavour} — per spec v2.76, a short context-appropriate
+            // {trackFlavour} - per spec v2.76, a short context-appropriate
             // phrase derived from the track's characteristics that can be
             // dropped into player/proximity/movement commentary. Resolves to
             // a track-specific fragment like "across the bridges", "past
@@ -2230,7 +2335,7 @@
                 // because templates assume the token always renders a
                 // complete phrase. For class D/E cars (and modest B/C
                 // cars) no attribute reaches "high" on the class-scaled
-                // threshold — return empty would break the template.
+                // threshold - return empty would break the template.
                 // Fall back through MEDIUM-classified attributes first,
                 // then the single highest raw value, then a generic
                 // phrase. Token always renders non-empty when car data
@@ -2252,11 +2357,11 @@
                     }
                 }
                 if (bestKey) return phrases[bestKey];
-                // Truly nothing — generic positive phrase so the sentence
+                // Truly nothing - generic positive phrase so the sentence
                 // still parses cleanly.
                 return 'running well';
             })(),
-            // {carWeakness}: opposite of {carStrength} — surfaces a "low"
+            // {carWeakness}: opposite of {carStrength} - surfaces a "low"
             // attribute the current track would punish. Empty when no car
             // data or no concerning low attribute.
             carWeakness: (function () {
@@ -2292,7 +2397,7 @@
             // form rather than the bare key. The previous fallback returned
             // the literal key (e.g. "{Position}" → "Position"), which is
             // exactly the silent-failure mode that produced the long-standing
-            // "Position has joined the track" rendering bug — a bad template
+            // "Position has joined the track" rendering bug - a bad template
             // token would render as a UI-label word that looked like a real
             // player name. Returning {token} makes the bug visible instantly.
             return vars[k] !== undefined ? vars[k] : '{' + k + '}';
@@ -2300,7 +2405,7 @@
     }
 
     function ordinal (n) {
-        if (!n || isNaN(n) || n < 1) return '—';
+        if (!n || isNaN(n) || n < 1) return '-';
         const s = ['th', 'st', 'nd', 'rd'];
         const v = n % 100;
         return n + (s[(v - 20) % 10] || s[v] || s[0]);
@@ -2313,13 +2418,13 @@
     }
 
     function formatCompletion (val) {
-        if (!val || val === '—') return val;
+        if (!val || val === '-') return val;
         return val.replace(/\.\d+%/, '%');
     }
 
-    // *** TWO-RACER GUARD — THE FIX ***
+    // *** TWO-RACER GUARD - THE FIX ***
     // racerCount comes ONLY from Position: X/Y (the authoritative Torn source).
-    // We use ONLY racerCount here — not racers.length, which could be wrong.
+    // We use ONLY racerCount here - not racers.length, which could be wrong.
     // Default (0 = unknown) → use safe 2-player lines only.
     function isThreePlusRace () {
         return state.racerCount >= 3;
@@ -2358,7 +2463,7 @@
 
     // Per spec: certain quiet statuses must always render commentary top-down,
     // regardless of the user's scroll-direction setting. These statuses have a
-    // fixed, short sequence of messages that read as a list — they should not
+    // fixed, short sequence of messages that read as a list - they should not
     // be reversed when the user has set scrollDirection to 'up'.
     const FORCE_TOP_DOWN_STATUSES = [
         'HOSPITAL', 'JAIL', 'TIMED_OUT', 'ALREADY_STARTED', 'NOT_ALLOWED',
@@ -2370,8 +2475,8 @@
         return state.scrollDirection;
     }
 
-    // In 'down' mode newest entries are at the bottom — auto-scroll keeps bottom visible.
-    // In 'up' mode newest entries are at the top — auto-scroll keeps top visible.
+    // In 'down' mode newest entries are at the bottom - auto-scroll keeps bottom visible.
+    // In 'up' mode newest entries are at the top - auto-scroll keeps top visible.
     function scrollToEdge () {
         requestAnimationFrame(function () {
             const el = getFeedEl();
@@ -2392,7 +2497,7 @@
         if (!el) return;
         const node = makeFeedNode(text, type, icon || '', isHtml);
         // Per spec: colour new commentary in white, with a .25s fade to normal.
-        // Applies only to genuinely new messages — NOT when the feed is rebuilt
+        // Applies only to genuinely new messages - NOT when the feed is rebuilt
         // from persisted history (rebuildFeed does not call this function).
         node.classList.add('tc-fl-new');
         setTimeout(function () { node.classList.remove('tc-fl-new'); }, 250);
@@ -2416,7 +2521,7 @@
         if (!el) return;
         el.innerHTML = '';
         if (effectiveScrollDirection() === 'up') {
-            // Render newest first — iterate in reverse
+            // Render newest first - iterate in reverse
             for (let i = feedLines.length - 1; i >= 0; i--) {
                 const l = feedLines[i];
                 el.appendChild(makeFeedNode(l.text, l.type, l.icon || '', l.isHtml));
@@ -2453,7 +2558,7 @@
             if (!knownRacerNames.has(r.name)) {
                 knownRacerNames.add(r.name);
                 // Only announce if we have a real name (not a dash or empty string)
-                const validRacerName = r.name && r.name !== '—' && r.name.length > 1;
+                const validRacerName = r.name && r.name !== '-' && r.name.length > 1;
                 if (knownRacerNames.size > 1 && validRacerName) {
                     // Per spec v2.88 BUG FIX: "in position 3rd" reads as a
                     // grammar error since "position" implies the numeric
@@ -2509,15 +2614,15 @@
     //   0    → reject all non-player non-ambient lines entirely
     // The `isPlayerRelated` flag lets callers bypass the gate for any line
     // involving the focused player (per spec: "Less means only player related
-    // messages"). Ambient lines also pass — callers omit the gate for those.
+    // messages"). Ambient lines also pass - callers omit the gate for those.
     function throttleShouldShow (isPlayerRelated) {
-        // Outside racing-like statuses, no throttling — full commentary.
+        // Outside racing-like statuses, no throttling - full commentary.
         if (!isRacingLike(state.status)) return true;
         // Player-related lines always pass.
         if (isPlayerRelated) return true;
-        // Slider at 100 — no throttling at all.
+        // Slider at 100 - no throttling at all.
         if (throttleValue >= 100) return true;
-        // Slider at 0 — suppress all non-player non-ambient lines outright.
+        // Slider at 0 - suppress all non-player non-ambient lines outright.
         if (throttleValue <= 0) return false;
         // Time-based gate. Gap scales inversely with slider value so a higher
         // slider lets more lines through. At slider=99 gap ≈ 100ms (effectively
@@ -2531,7 +2636,7 @@
         return true;
     }
 
-    // Legacy alias — earlier code paths still call bigRaceShouldShow() in a
+    // Legacy alias - earlier code paths still call bigRaceShouldShow() in a
     // few places. Route them through the new throttle so the old name keeps
     // working without a wide rename across the file. Callers that don't pass
     // an explicit isPlayerRelated argument default to false (treat as
@@ -2567,7 +2672,7 @@
         // Hoisted out here, it always gets to run during PRE_LAUNCH.
         //
         // Per spec v2.91: legal-race lights markers expanded to 18s, 12s,
-        // 7s, 3s — earlier and more spread out than the previous 5/3/2/1.
+        // 7s, 3s - earlier and more spread out than the previous 5/3/2/1.
         // Illegal-race flag markers stay at 15s/10s/1s. Pass anything in
         // 1..18s through to fireLightOrFlagSequence which internally only
         // acts on the right markers per race type.
@@ -2615,7 +2720,7 @@
             const lonely = isPlayerAloneOnTrack();
             // Per spec v2.83: in the first ~15 seconds of RACING, prefer
             // the startGrid pool over normal ambient. Cap at 2 lines fired
-            // so we don't flood the feed with start chatter — by then the
+            // so we don't flood the feed with start chatter - by then the
             // race is properly underway. Skip entirely when restored into
             // RACING from a refresh (raceStartedAt stays 0 in that case).
             const inStartWindow = state.raceStartedAt > 0
@@ -2625,7 +2730,14 @@
                 if (lonely) {
                     pushLine(fill(pickLine(LINES.RACING.lonelyFinish, 'lonely')), 'ambient');
                 } else if (inStartWindow) {
-                    pushLine(fill(pickLine(LINES.RACING.startGrid, 'startGrid')), 'ambient');
+                    // Per spec v2.92: the FIRST start-grid line of each
+                    // race uses a positional pool reflecting how the
+                    // player got off the line. Subsequent lines use the
+                    // generic startGrid pool above.
+                    const pool = (state.startGridLinesFired === 0)
+                        ? getStartGridPositionalPool()
+                        : LINES.RACING.startGrid;
+                    pushLine(fill(pickLine(pool, 'startGrid')), 'ambient');
                     state.startGridLinesFired++;
                     // Tighter cadence during the start window so the two
                     // launch lines land within the first 10s of racing.
@@ -2644,26 +2756,26 @@
                 }
                 tPlayer = now + PLAYER_GAP + Math.random() * 8000;
             }
-            // Position calls — gated by cooldown; pool selection uses authoritative racerCount.
+            // Position calls - gated by cooldown; pool selection uses authoritative racerCount.
             // Suppressed when player is alone (no other racers left to reference).
-            // Per spec v2.86: use active racer count — finishers stay on the
+            // Per spec v2.86: use active racer count - finishers stay on the
             // leaderboard but shouldn't keep position-change commentary alive
             // when the active field has dropped below 2.
             const activeCount = getActiveRacers().length;
             if (now >= tPosition && now >= tPosCooldown && activeCount >= 2 && !lonely) {
                 if (bigRaceShouldShow()) {
                     if (isThreePlusRace()) {
-                        // 3+ racers confirmed from Position: X/Y — safe to use position3 lines
+                        // 3+ racers confirmed from Position: X/Y - safe to use position3 lines
                         const pool = LINES.RACING.position3.concat(LINES.RACING.position2);
                         pushLine(fill(pickLine(pool, 'position')), 'position');
                     } else {
-                        // 2 racers or unknown — only use 2-player-safe lines
+                        // 2 racers or unknown - only use 2-player-safe lines
                         pushLine(fill(pickLine(LINES.RACING.position2, 'position')), 'position');
                     }
                 }
                 tPosition = now + POSITION_GAP + Math.random() * 5000;
             }
-            // Movement and proximity also gated on !lonely — no other racers
+            // Movement and proximity also gated on !lonely - no other racers
             // means nothing to move past or alongside.
             if (!lonely) detectMovement();
             if (now >= tProximity && activeCount >= 2 && !lonely) {
@@ -2687,6 +2799,7 @@
                     // regardless of which track is being raced.
                     const threshold = getProximityThresholdForTrack(state.track);
                     const closePair = findClosestPair(getActiveRacers(), completions, threshold);
+                    let usedLingering = false;
                     if (closePair) {
                         // Cooldown per pair so a sustained 0.1% battle
                         // doesn't refire every poll.
@@ -2698,14 +2811,46 @@
                             p2 = closePair.front;
                             recentProximityPairs[key] = now;
                         }
+                    } else {
+                        // Per spec v2.92: no close pair, so look one band
+                        // wider for a "refusing to drop away" pair - gap
+                        // between threshold and 5%. Same cooldown bucket
+                        // as close-proximity so the two modes don't both
+                        // fire for the same pair in quick succession.
+                        const lingerPair = findLingeringPair(
+                            getActiveRacers(), completions, threshold, 5.0
+                        );
+                        if (lingerPair) {
+                            const key = proximityPairKey(lingerPair.front.name, lingerPair.back.name);
+                            const last = recentProximityPairs[key] || 0;
+                            if (now - last >= PROXIMITY_PAIR_COOLDOWN_MS) {
+                                p1 = lingerPair.back;
+                                p2 = lingerPair.front;
+                                recentProximityPairs[key] = now;
+                                usedLingering = true;
+                            }
+                        }
                     }
+                    // Stash which pool to draw from so the firing branch
+                    // below knows whether to use proximity or lingering.
+                    state._proximityUseLingering = usedLingering;
                 }
-                // No else branch — when scraping fails or no pair is close
+                // No else branch - when scraping fails or no pair is close
                 // enough, proximity stays silent. This is correct: better
                 // no commentary than wrong commentary.
                 if (p1 && p2 && bigRaceShouldShow()) {
+                    // Per spec v2.92: pick the right pool based on which
+                    // tier matched. Lingering uses the dedicated "refusing
+                    // to drop away" pool; close uses the original tight-
+                    // battle pool.
+                    const proxPool = state._proximityUseLingering
+                        ? LINES.RACING.proximityLingering
+                        : LINES.RACING.proximity;
+                    const proxKey = state._proximityUseLingering
+                        ? 'proximityLingering'
+                        : 'proximity';
                     pushLine(
-                        fill(pickLine(LINES.RACING.proximity, 'proximity'), { p1name: p1.name, p2name: p2.name }),
+                        fill(pickLine(proxPool, proxKey), { p1name: p1.name, p2name: p2.name }),
                         'position', ICON.proximity
                     );
                 }
@@ -2720,7 +2865,7 @@
                 }
             }
             // Per spec v2.86: funny commentary should only feature racers
-            // still in the race — joking about a racer who's already in the
+            // still in the race - joking about a racer who's already in the
             // pits reads wrong.
             if (now >= tFunny) {
                 const active = getActiveRacers();
@@ -2743,7 +2888,7 @@
         // Per spec v2.86: iterate only active racers. Finishers stay on
         // the leaderboard with their position intact (so excludeCrashed
         // no longer mutates state.racers) but movement commentary should
-        // never reference a finisher — they're not moving anywhere.
+        // never reference a finisher - they're not moving anywhere.
         getActiveRacers().forEach(function (r) {
             const prev = prevMap[r.name];
             if (!prev || prev === r.posNum) return;
@@ -2787,7 +2932,7 @@
     function fireCrashSequence () {
         const msgs = [
             fill('There has been a crash!'),
-            fill('{player} has overturned — {car} is in flames.'),
+            fill('{player} has overturned - {car} is in flames.'),
             fill('Racers are veering around, barely missing the wreckage.'),
             fill('{player} looks to have been rescued, though not in good shape.')
         ];
@@ -2797,7 +2942,7 @@
     }
 
     // Fire the sequence for when ANOTHER racer crashes (not the player).
-    // The race continues, so status stays in RACING — just the feed shows the events.
+    // The race continues, so status stays in RACING - just the feed shows the events.
     function fireOtherCrashSequence (crashedName) {
         const msgs = [
             'There has been a crash!',
@@ -2831,7 +2976,7 @@
             '[class*="status"][class*="crash"]',
             '[class*="statusCrash"]',
             '[class*="crashed"]',
-            // Lone .crash element inside an lbr- racer row — catches Torn's
+            // Lone .crash element inside an lbr- racer row - catches Torn's
             // structure where the crash indicator is just <div class="crash">
             // without "status" being a sibling class on the same element
             'li[class*="lbr-"] .crash',
@@ -2839,7 +2984,7 @@
             // Some module-CSS schemes hash class names like _crash_xyz123
             'li[class*="lbr-"] [class^="crash"]',
             'li[class*="lbr-"] [class*=" crash"]',
-            // Status-wrap with crash child — the spec's exact path
+            // Status-wrap with crash child - the spec's exact path
             'li[class*="status-wrap"] [class*="crash"]'
         ];
         const candidates = new Set();
@@ -2864,7 +3009,7 @@
             // Skip: stale crash markers inside Torn's Events / Messages / Awards
             // dropdowns are race history, not the current race.
             if (isInsideTornMenu(li)) return;
-            // Skip: rows whose text reads like an Events feed entry — the "crash"
+            // Skip: rows whose text reads like an Events feed entry - the "crash"
             // marker there describes a past race, not a live one.
             if (looksLikeEventsRow(li)) return;
 
@@ -2952,7 +3097,7 @@
             }
 
             // Strategy 2: progress bar inline-style width. Per v2.85 BUG
-            // FIX, no longer excludes 0% or 100% width — the previous
+            // FIX, no longer excludes 0% or 100% width - the previous
             // exclusion meant racers near the start or finish line wouldn't
             // be detected. We still prefer non-extreme values when multiple
             // matches exist (often the case in nested progress containers
@@ -3004,7 +3149,7 @@
             // row.textContent (not row.innerText) to dodge layout reflow.
             if (pct === null) {
                 // Don't pick up the leaderboard's "Position: 3/12" or similar
-                // ratios — only N.NN% (with explicit decimal and percent sign).
+                // ratios - only N.NN% (with explicit decimal and percent sign).
                 const m = (row.textContent || '').match(/(\d+\.\d+)\s*%/);
                 if (m) {
                     const v = parseFloat(m[1]);
@@ -3025,7 +3170,7 @@
     // Racers are expected to come from state.racers (the leaderboard scrape)
     // and the result is filtered by what's actually present in `completions`.
     // Crashed and finished racers should have been filtered out of state.racers
-    // by excludeCrashed() before calling this — but we belt-and-brace via
+    // by excludeCrashed() before calling this - but we belt-and-brace via
     // the completion map (anyone not in `completions` is silently skipped).
     function findClosestPair (racers, completions, thresholdPct) {
         if (!racers || racers.length < 2) return null;
@@ -3052,10 +3197,43 @@
         return best;
     }
 
+    // Per spec v2.92: "refusing to drop away" pair finder. Returns the
+    // adjacent pair whose gap is LARGER than the close-proximity threshold
+    // but still within (threshold, lingerCapPct] - i.e. the chaser is in
+    // touch but not in attacking position. Same shape return as
+    // findClosestPair so the dispatch can treat them similarly.
+    function findLingeringPair (racers, completions, thresholdPct, lingerCapPct) {
+        if (!racers || racers.length < 2) return null;
+        if (!completions || Object.keys(completions).length < 2) return null;
+        const ranked = [];
+        for (let i = 0; i < racers.length; i++) {
+            const r = racers[i];
+            if (!r || !r.name) continue;
+            const c = completions[r.name];
+            if (typeof c !== 'number') continue;
+            ranked.push({ r: r, c: c });
+        }
+        if (ranked.length < 2) return null;
+        ranked.sort(function (a, b) { return b.c - a.c; });
+        let best = null;
+        for (let i = 0; i < ranked.length - 1; i++) {
+            const gap = ranked[i].c - ranked[i + 1].c;
+            // Strictly above the close-proximity threshold, but within the
+            // lingering cap. Prefer the SMALLEST qualifying gap (tightest
+            // remaining battle once close-proximity is excluded).
+            if (gap <= thresholdPct) continue;
+            if (gap > lingerCapPct) continue;
+            if (!best || gap < best.gap) {
+                best = { front: ranked[i].r, back: ranked[i + 1].r, gap: gap };
+            }
+        }
+        return best;
+    }
+
     // Per-pair cooldown tracking for proximity announcements. Without this
     // a sustained close battle (which can last many seconds at 0.1% gap)
     // would refire the same line every poll. Keyed by sorted name pair.
-    // Session-only — fine for the use case.
+    // Session-only - fine for the use case.
     let recentProximityPairs = {};
     const PROXIMITY_PAIR_COOLDOWN_MS = 25000;
     function proximityPairKey (a, b) {
@@ -3065,7 +3243,7 @@
     // Per spec v2.80: detect other racers crossing the finish line from the
     // DOM. The previous logic only added the PLAYER to knownFinishers when
     // ENDED status fired, which meant the lonely-finish branch (added in
-    // v2.78) could never trigger — there was always exactly one "finisher"
+    // v2.78) could never trigger - there was always exactly one "finisher"
     // (the player) but never any others to compare against.
     //
     // Spec-provided selector:
@@ -3094,21 +3272,21 @@
             if (isInsideTornMenu(row)) return;
             if (looksLikeEventsRow(row)) return;
             // The time element only exists on finished rows. When present,
-            // its text matches HH:MM:SS or MM:SS — both valid finish times
+            // its text matches HH:MM:SS or MM:SS - both valid finish times
             // (a sub-hour race shows MM:SS in some Torn variants).
             const timeEl = row.querySelector('li.time, li[class*="time"]');
             if (!timeEl) return;
             const tText = (timeEl.textContent || '').trim();
             // Require a colon-separated time. Per spec v2.81, the actual
-            // format Torn uses is MM:SS.ss (minutes:seconds.hundredths) —
+            // format Torn uses is MM:SS.ss (minutes:seconds.hundredths) -
             // e.g. "02:34.56" for a 2-minute 34.56-second race. The v2.80
             // regex only accepted colon-separated HH:MM:SS / MM:SS forms,
             // which is why finisher detection still wasn't firing.
             // Accepted variants:
-            //   MM:SS.ss      — primary form per spec
-            //   MM:SS         — defensive (some pages may omit hundredths)
-            //   HH:MM:SS      — defensive for long races
-            //   HH:MM:SS.ss   — defensive belt-and-braces
+            //   MM:SS.ss      - primary form per spec
+            //   MM:SS         - defensive (some pages may omit hundredths)
+            //   HH:MM:SS      - defensive for long races
+            //   HH:MM:SS.ss   - defensive belt-and-braces
             if (!/^\d{1,2}:\d{2}(:\d{2})?(\.\d{1,2})?$/.test(tText)) return;
             // Now pull the name. Same defensive selectors as the leaderboard
             // scraper (li.name with possible inner span).
@@ -3125,7 +3303,7 @@
             if (knownFinishers.has(name)) return;
             if (otherCrashedNames.has(name)) return;
             // Record the finisher. We don't fire a "X crosses the line"
-            // line here — per spec "It will not display other players who
+            // line here - per spec "It will not display other players who
             // finish afterwards." The detection is purely for state
             // tracking so the lonely-finish branch and commentary filtering
             // (excludeCrashed) can do their job.
@@ -3141,7 +3319,7 @@
     // Filter out crashed racers from any active racer list used for commentary.
     // Spec: "disregard them from the commentary, do not use their name again."
     // Per spec v2.78: ALSO filter out racers who've already finished the
-    // race — "Do not include drivers ahead of the player if they finish the
+    // race - "Do not include drivers ahead of the player if they finish the
     // race." Same principle: once they're out of the race (whether by crash
     // or by crossing the line), commentary about them is irrelevant.
     function excludeCrashed (racers) {
@@ -3167,6 +3345,45 @@
         return excludeCrashed(state.racers || []);
     }
 
+    // Per spec v2.92: pick the right post-launch positional pool based on
+    // the player's starting position. Tiers:
+    //   1st                       : startGridFirst   (celebratory)
+    //   top 25% (excluding 1st)   : startGridTopQuarter (competent)
+    //   middle 50%                : startGridMid     (neutral)
+    //   bottom 25%                : startGridBottomQuarter (negative)
+    //
+    // For small fields (10 or fewer), the buckets use direct position
+    // mapping so the gradient still has meaningful resolution:
+    //   pos 1            : first
+    //   pos 2 to ceil(N/4): top quarter
+    //   pos through 3N/4 : mid
+    //   remainder        : bottom quarter
+    //
+    // Falls back to the generic startGrid pool if position data is missing.
+    function getStartGridPositionalPool () {
+        const pos = parseInt(state.position, 10) || 0;
+        const total = state.raceFieldSize || state.racerCount || (state.racers || []).length || 0;
+        if (!pos || !total || pos > total) return LINES.RACING.startGrid;
+
+        if (pos === 1) return LINES.RACING.startGridFirst;
+
+        if (total <= 10) {
+            // Small-field direct mapping. Round up so a 4-car field gets
+            // 1=first / 2=top / 3=mid / 4=bottom rather than collapsing.
+            const topMax = Math.max(1, Math.ceil(total * 0.25));
+            const midMax = Math.max(topMax, Math.ceil(total * 0.75));
+            if (pos <= topMax) return LINES.RACING.startGridTopQuarter;
+            if (pos <= midMax) return LINES.RACING.startGridMid;
+            return LINES.RACING.startGridBottomQuarter;
+        }
+
+        // Standard percentile buckets for larger fields.
+        const pct = pos / total;
+        if (pct <= 0.25) return LINES.RACING.startGridTopQuarter;
+        if (pct <= 0.75) return LINES.RACING.startGridMid;
+        return LINES.RACING.startGridBottomQuarter;
+    }
+
     // ─── Status transition ────────────────────────────────────────────────────────
     const CLEAR_ON_ENTRY = [S.COUNTDOWN, S.PRE_LAUNCH, S.RACING, S.RACE_REPLAY];
 
@@ -3179,7 +3396,7 @@
         // clear commentary on exit so the quiet-status messages don't linger
         // alongside whatever the new status produces. Most new-status entry
         // handlers already call clearFeed(), but this exit-clear runs first
-        // and unconditionally — defence-in-depth in case a future entry handler
+        // and unconditionally - defence-in-depth in case a future entry handler
         // is added that doesn't clear.
         const CLEAR_ON_EXIT_FROM = [S.IN_GARAGE, S.TORN_DOWN, S.STATISTICS, S.ENLISTED];
         if (oldSt && CLEAR_ON_EXIT_FROM.indexOf(oldSt) !== -1 && oldSt !== newSt) {
@@ -3214,6 +3431,9 @@
                 // Per spec v2.87: clear light/flag sequence trackers so the
                 // sequence fires once per pre-launch.
                 state.lightSeqFired = {};
+                // Per spec v2.92: clear start-position snapshot. It gets
+                // populated on the first RACING tick (see snapshotStartPositions).
+                racersAtStart = {};
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -3248,7 +3468,7 @@
                 );
             }
             // Only show the join message when we have a real name and position.
-            const validName = state.playerName !== '—' && state.playerName !== ''
+            const validName = state.playerName !== '-' && state.playerName !== ''
                 && !NAME_BLACKLIST.test(state.playerName);
             const validPos = parseInt(state.position, 10) >= 1;
             if (validName && validPos) {
@@ -3260,12 +3480,12 @@
             fireEntryMessages();
         }
         if (newSt === S.PRE_LAUNCH && oldSt !== S.PRE_LAUNCH) {
-            // Only announce an entry if we came from MENU/unknown — not from COUNTDOWN,
+            // Only announce an entry if we came from MENU/unknown - not from COUNTDOWN,
             // where the entry was already announced.
             if (oldSt === S.MENU || oldSt === S.ENDED || oldSt === S.CRASHED || !oldSt) {
                 fireEntryMessages();
             }
-            pushLine('Engines are revving — not long until launch.', 'status', ICON.prelaunch);
+            pushLine('Engines are revving - not long until launch.', 'status', ICON.prelaunch);
             if (oldSt === S.COUNTDOWN) {
                 pushLine('We are now in Pre-Launch.', 'status', ICON.prelaunch);
             }
@@ -3286,7 +3506,7 @@
             // IN_GARAGE while the race was running and now return).
             //
             // Two guards:
-            //   1. Previous status must be PRE_LAUNCH or COUNTDOWN — the
+            //   1. Previous status must be PRE_LAUNCH or COUNTDOWN - the
             //      only legitimate pre-race statuses that transition into
             //      RACING when the lights/flag actually go.
             //   2. Completion % must be effectively zero. If we're at 50%
@@ -3299,26 +3519,30 @@
             const completionPct = parseFloat(state.completion) || 0;
             const justStarted = completionPct < 5;
             if (!restoredIntoRacing && wasPreRace && justStarted) {
-                const tn = state.track !== '—' ? state.track : 'this circuit';
+                const tn = state.track !== '-' ? state.track : 'this circuit';
                 // Per spec v2.87: illegal races use flag wording, legal
                 // races use green-light wording.
                 const startMsg = isIllegalTrack(state.track)
-                    ? "Flag drops \u2014 we are racing on " + tn + "!"
-                    : "It's a green light \u2014 we are go on " + tn + "!";
+                    ? "Flag drops - we are racing on " + tn + "!"
+                    : "It's a green light - we are go on " + tn + "!";
                 pushLine(startMsg, 'status', ICON.flag);
                 // Per spec v2.83: arm the start-grid window. ambient
                 // dispatch will draw from LINES.RACING.startGrid for the
                 // next few seconds, then revert to normal RACING ambient.
                 state.raceStartedAt = Date.now();
                 state.startGridLinesFired = 0;
+                // Per spec v2.92: snapshot the starting grid so the outro
+                // can mention standouts (biggest position gain) and poor
+                // performers (biggest position loss).
+                snapshotStartPositions();
             }
         }
         if (newSt === S.RACE_REPLAY && oldSt !== S.RACE_REPLAY) {
             // Replays are treated like RACING for commentary, but with a
             // dedicated entry line so the user knows what they're watching.
             clearFeed();
-            const tn = state.track !== '—' ? state.track : 'this circuit';
-            pushLine('Replay rolling — race action on ' + tn + '!', 'status', ICON.flag);
+            const tn = state.track !== '-' ? state.track : 'this circuit';
+            pushLine('Replay rolling - race action on ' + tn + '!', 'status', ICON.flag);
         }
         if (newSt === S.CRASHED) fireCrashSequence();
         if (newSt === S.MENU && oldSt !== S.MENU) {
@@ -3335,7 +3559,7 @@
             // Build the second line with a clickable link to the travel page.
             // The text is HTML-trusted because we construct it ourselves with
             // the player's name escaped via escH().
-            const safeName = escH(state.playerName !== '—' && state.playerName ? state.playerName : 'The driver');
+            const safeName = escH(state.playerName !== '-' && state.playerName ? state.playerName : 'The driver');
             const html = safeName + ' is currently <a class="tc-link" href="https://www.torn.com/page.php?sid=travel" target="_blank" rel="noopener">flying or abroad</a>.';
             pushLine(html, 'status', '', true);
         }
@@ -3349,7 +3573,7 @@
         if (newSt === S.JAIL && oldSt !== S.JAIL) {
             clearFeed();
             // Jail: single line, then no further commentary until the page
-            // returns to a normal status. Per spec v2.71 — plain text, no
+            // returns to a normal status. Per spec v2.71 - plain text, no
             // hyperlink (unlike HOSPITAL).
             pushLine('You are in jail, no access to racing right now.', 'status', '', true);
         }
@@ -3361,7 +3585,7 @@
         }
         if (newSt === S.ALREADY_STARTED && oldSt !== S.ALREADY_STARTED) {
             clearFeed();
-            const safeName = (state.playerName !== '—' && state.playerName)
+            const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
             pushLine(safeName + ' drives onto the paddock.', 'status');
             pushLine('There are no racers, it is deserted.', 'status');
@@ -3369,7 +3593,7 @@
         }
         if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL) {
             clearFeed();
-            const safeName = (state.playerName !== '—' && state.playerName)
+            const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
             pushLine(safeName + ' attempts to squeeze his car onto the race.', 'status');
             pushLine('Armed marshalls draw their weapons.', 'status');
@@ -3377,7 +3601,7 @@
         }
         if (newSt === S.NOT_ENOUGH_FUNDS && oldSt !== S.NOT_ENOUGH_FUNDS) {
             clearFeed();
-            const safeName = (state.playerName !== '—' && state.playerName)
+            const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
             pushLine(safeName + ' drives onto the paddock.', 'status');
             pushLine('But they are immediately turned around.', 'status');
@@ -3385,9 +3609,9 @@
         }
         if (newSt === S.NOT_ALLOWED && oldSt !== S.NOT_ALLOWED) {
             clearFeed();
-            const safeName = (state.playerName !== '—' && state.playerName)
+            const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
-            const safeCar = (state.car !== '—' && state.car) ? state.car : 'car';
+            const safeCar = (state.car !== '-' && state.car) ? state.car : 'car';
             pushLine(safeName + ' drives onto the paddock in their ' + safeCar + '.', 'status');
             pushLine('Marshalls frantically point towards the exit.', 'status');
             pushLine('"Can\'t you read the race specs. You fool"', 'status');
@@ -3413,7 +3637,7 @@
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
-    // Template pool for the AI-style race summary — second of the four outro
+    // Template pool for the AI-style race summary - second of the four outro
     // lines. A Tampermonkey userscript cannot embed an Anthropic API key in
     // public source (anyone could read and abuse it), so genuine LLM-generated
     // summaries are not feasible here. Instead these templates are written in
@@ -3427,35 +3651,122 @@
         "What a contest we have witnessed today on {track}. {player} battled through a field of {total} and came home in {pos}. The crowd will remember this one for some time.",
         "{track} put on a show, ladies and gentlemen. {player} fought hard and finished {pos} out of {total}. Performances like that are what bring the punters back race after race.",
         "An absolute belter of a race on {track}. {player} crossed the line in {pos} after a frantic battle. The standard of driving today was truly something to behold.",
-        "Drama, speed, and a touch of madness — that was the story on {track} today. {player} took {pos} from a field of {total}. We have seen some racing here, my goodness.",
+        "Drama, speed, and a touch of madness - that was the story on {track} today. {player} took {pos} from a field of {total}. We have seen some racing here, my goodness.",
         "From flag to flag, {track} delivered everything we hoped for. {player} secured {pos} in a {total}-driver scrap. A worthy result on a tough circuit.",
         "If you missed this one on {track}, you missed something special. {player} brought it home in {pos} amidst a frantic field of {total}. Pure racing entertainment from start to finish.",
         "The chequered flag has fallen on {track}, and what a race it was. {player} fought tooth and nail to claim {pos}. Every position out there was earned, not given.",
         "Today's race on {track} had everything we love about this sport. {player} finishes in {pos} of {total} after a relentless battle. Tip of the cap to every driver who lined up today.",
-        "Sometimes a race rewrites the form book — this was one of those days at {track}. {player} took {pos} from a {total}-strong field. Memorable scenes from start to finish.",
-        "Hold onto your hats — {track} just served up a thriller. {player} settled into {pos}, fighting every inch of the way. That, my friends, is why we tune in week after week."
+        "Sometimes a race rewrites the form book - this was one of those days at {track}. {player} took {pos} from a {total}-strong field. Memorable scenes from start to finish.",
+        "Hold onto your hats - {track} just served up a thriller. {player} settled into {pos}, fighting every inch of the way. That, my friends, is why we tune in week after week."
     ];
+
+    // Per spec v2.92: smaller summary pool for small-field races (under 25
+    // racers). The large-field templates above lean into "field of 50" type
+    // grandeur which reads wrong for a quick 4-car sprint. These are pared-
+    // back, single or two-sentence summaries.
+    const OUTRO_SUMMARIES_SMALL = [
+        "A tidy little contest on {track}. {player} finished in {pos}.",
+        "{track} dispatched quickly today. {player} brought it home in {pos}.",
+        "Short and sharp on {track}. {player} took {pos} from a field of {total}.",
+        "A neat scrap on {track}. {player} crosses the line in {pos}.",
+        "Quick work on {track} today. {player} ends up in {pos}.",
+        "{player} sees the chequered flag in {pos} on {track}. A clean little race.",
+        "Compact field, frantic action. {player} secures {pos} on {track}."
+    ];
+
+    // Per spec v2.92: track per-racer position deltas across the race so
+    // the outro can mention standouts (biggest gain), poor performers
+    // (biggest loss), and crashed racers. Map from name -> starting
+    // position number. Populated on the first racing tick of a race;
+    // cleared on race entry.
+    let racersAtStart = {};
+
+    function snapshotStartPositions () {
+        // Called once per race when state.racers first has data during
+        // RACING. Persisting across polls inside racersAtStart.
+        if (Object.keys(racersAtStart).length > 0) return;
+        const rs = state.racers || [];
+        for (let i = 0; i < rs.length; i++) {
+            const r = rs[i];
+            if (!r || !r.name) continue;
+            racersAtStart[r.name] = r.posNum || (i + 1);
+        }
+    }
+
+    // Per spec v2.92: returns { standout, poor, crashed } string snippets to
+    // append to the outro summary. Standout is the racer with the biggest
+    // position gain; poor is the biggest loss; crashed lists up to 2 names
+    // from otherCrashedNames. Each may be empty if no notable change.
+    function getStandoutSnippets () {
+        const out = { standout: '', poor: '', crashed: '' };
+        try {
+            const finalRacers = (state.racers || []).concat(state.finishers || []);
+            const seen = {};
+            let biggestGain = null, biggestLoss = null;
+            for (let i = 0; i < finalRacers.length; i++) {
+                const r = finalRacers[i];
+                if (!r || !r.name) continue;
+                if (seen[r.name]) continue;
+                seen[r.name] = true;
+                if (r.name === state.playerName) continue;
+                const startPos = racersAtStart[r.name];
+                const endPos = r.posNum || r.pos || null;
+                if (!startPos || !endPos) continue;
+                const delta = startPos - endPos; // positive = gained positions
+                if (!biggestGain || delta > biggestGain.delta) biggestGain = { name: r.name, delta: delta, startPos: startPos, endPos: endPos };
+                if (!biggestLoss || delta < biggestLoss.delta) biggestLoss = { name: r.name, delta: delta, startPos: startPos, endPos: endPos };
+            }
+            if (biggestGain && biggestGain.delta >= 2) {
+                out.standout = ' Special mention to ' + biggestGain.name
+                    + ' for climbing from ' + ordinal(biggestGain.startPos)
+                    + ' to ' + ordinal(biggestGain.endPos) + '.';
+            }
+            if (biggestLoss && biggestLoss.delta <= -2) {
+                out.poor = ' A rough day for ' + biggestLoss.name
+                    + ', sliding from ' + ordinal(biggestLoss.startPos)
+                    + ' to ' + ordinal(biggestLoss.endPos) + '.';
+            }
+            if (otherCrashedNames && otherCrashedNames.size) {
+                const crashedArr = Array.from(otherCrashedNames).slice(0, 2);
+                if (crashedArr.length === 1) {
+                    out.crashed = ' Spare a thought for ' + crashedArr[0] + ', whose race ended in the wreckage.';
+                } else if (crashedArr.length >= 2) {
+                    out.crashed = ' Spare a thought for ' + crashedArr[0] + ' and ' + crashedArr[1]
+                        + ', whose races ended in the wreckage.';
+                }
+            }
+        } catch (_) {}
+        return out;
+    }
 
     // pickSummary selects a templated outro summary that hasn't been used
     // recently, fills in the race-specific tokens, and returns the result.
     function pickSummary () {
         try {
-            const template = pickLine(OUTRO_SUMMARIES, 'outro');
-            // Fill tokens manually here so we control which fields are available
-            const total = state.raceFieldSize || state.racerCount || state.finishers.length || '?';
+            // Per spec v2.92: choose summary pool by field size.
+            //   <25 racers: small/short summary pool
+            //   >=25 racers: full summary pool (existing behaviour)
+            const total = state.raceFieldSize || state.racerCount || state.finishers.length || 0;
+            const isSmallField = (total > 0 && total < 25);
+            const pool = isSmallField ? OUTRO_SUMMARIES_SMALL : OUTRO_SUMMARIES;
+            const template = pickLine(pool, 'outro');
             const playerFinish = state.finishers.find(function (f) { return f.name === state.playerName; });
             const posNum = playerFinish ? playerFinish.pos : (parseInt(state.position, 10) || 0);
-            const safePlayer = (state.playerName && state.playerName !== '—' && !NAME_BLACKLIST.test(state.playerName))
+            const safePlayer = (state.playerName && state.playerName !== '-' && !NAME_BLACKLIST.test(state.playerName))
                 ? state.playerName : 'The driver';
-            const safeTrack = (state.track && state.track !== '—') ? state.track : 'this circuit';
-            return template
+            const safeTrack = (state.track && state.track !== '-') ? state.track : 'this circuit';
+            const base = template
                 .replace(/\{player\}/g, safePlayer)
                 .replace(/\{track\}/g, safeTrack)
                 .replace(/\{pos\}/g, posNum > 0 ? ordinal(posNum) : 'a strong position')
-                .replace(/\{total\}/g, total);
+                .replace(/\{total\}/g, total || '?');
+            // Per spec v2.92: append standout, poor, and crash snippets to
+            // the base summary. Each can be empty so the summary stays
+            // clean when nothing notable happened.
+            const sn = getStandoutSnippets();
+            return base + sn.standout + sn.poor + sn.crashed;
         } catch (e) {
             console.error('[TC Race Commentary] pickSummary:', e);
-            // Conservative fallback if anything throws — keeps the outro flowing.
             return 'A truly memorable contest from start to finish. Hard racing throughout, and every driver gave their all. We will not forget this one in a hurry.';
         }
     }
@@ -3469,7 +3780,7 @@
         // regardless of which other racers Torn is currently displaying.
         if (state.outroShown) return;
         const pname = state.playerName;
-        if (!pname || pname === '—' || NAME_BLACKLIST.test(pname)) return;
+        if (!pname || pname === '-' || NAME_BLACKLIST.test(pname)) return;
 
         // Check if the player is in the scraped finisher list. If yes, capture
         // their position. If no, fall back to using state.position when ENDED.
@@ -3518,14 +3829,14 @@
         }, 3000);
         setTimeout(function () {
             try {
-                pushLine('Brought to you by Sanxion [2987640].', 'outro');
+                pushLine('Brought to you by KZYM Torn City.', 'outro');
                 saveState();
             } catch (e) { console.error('[TC RC] outro 4:', e); }
         }, 4000);
     }
 
     // ─── Scrapers ─────────────────────────────────────────────────────────────────
-    // getPageText — clones the body, removes our HUD and any other injected
+    // getPageText - clones the body, removes our HUD and any other injected
     // overlay elements before reading innerText. This is the most reliable way
     // to isolate Torn's own page text from other running Tampermonkey scripts,
     // without complex TreeWalker filtering that can miss edge cases.
@@ -3539,7 +3850,7 @@
     function getPageText () {
         // Per-poll cache: return memoised text if computed already this tick.
         // The cache is invalidated at the top of poll() so it can never serve
-        // stale data across ticks. This is the primary memory-leak fix —
+        // stale data across ticks. This is the primary memory-leak fix -
         // previously each poll cloned the body ~11 times.
         if (pollTextCache !== null) return pollTextCache;
         if (!document.body) {
@@ -3554,7 +3865,7 @@
             // Remove any position:fixed or position:absolute overlays injected
             // by other scripts (common pattern for Tampermonkey UI injections).
             // We identify them by checking for elements that sit outside the
-            // normal Torn page DOM structure — fixed-position divs with custom ids.
+            // normal Torn page DOM structure - fixed-position divs with custom ids.
             const overlays = clone.querySelectorAll(
                 '[id^="tc-"],[id^="torn-"],[id^="tm-"],[id^="gm-"],' +
                 '[class^="tc-"],[class^="torn-"],[class^="tm-"],[class^="gm-"]'
@@ -3565,7 +3876,7 @@
             // gets falsely picked up by our scrapers. The dropdowns share several
             // class/id patterns we can target broadly.
             const tornMenus = clone.querySelectorAll(
-                // Torn's Events drop-down — the precise class confirmed by the user
+                // Torn's Events drop-down - the precise class confirmed by the user
                 '.recent-history-content,[class*="recent-history-content"],' +
                 // Events drop-down menu (other class variants)
                 '[id*="events-list"],[id*="eventsList"],[id*="event-list"],[id*="eventList"],' +
@@ -3577,7 +3888,7 @@
                 '[class*="notifications-list"],[class*="notificationsList"],' +
                 '[class*="messages-list"],[class*="messagesList"],' +
                 '[class*="awards-list"],[class*="awardsList"],' +
-                // Torn marks open dropdowns with these state classes — strip the entire panel
+                // Torn marks open dropdowns with these state classes - strip the entire panel
                 '[class*="dropdown"][class*="open"],[class*="dropdown"][class*="active"]'
             );
             tornMenus.forEach(function (el) {
@@ -3588,7 +3899,7 @@
             // signature (a "1m"/"2h"/"5d" recency counter followed by event prose,
             // or a "You ..." sentence pattern). These are Events menu entries that
             // survived the structural strip and would otherwise corrupt status
-            // detection — e.g. an Events entry containing "crashed" was triggering
+            // detection - e.g. an Events entry containing "crashed" was triggering
             // false CRASHED status changes.
             raw = raw.split(/\n+/).filter(function (line) {
                 const t = line.trim();
@@ -3643,7 +3954,7 @@
     //
     // v2.88 added a defensive fallback: when scrapeCountdown's prefix-
     // matching regex doesn't find "Race will Start in N seconds" (e.g.
-    // because Torn renders the last few seconds differently — perhaps as
+    // because Torn renders the last few seconds differently - perhaps as
     // just "N seconds" or no text at all), do a secondary sweep of the
     // page text for any compact "N second(s)" pattern that appears
     // standalone. We only trust this fallback when status is PRE_LAUNCH
@@ -3662,7 +3973,7 @@
             if (s) total += parseInt(s[1], 10);
             if (total > 0) return total;
         }
-        // Defensive secondary sweep — search the live page text for a
+        // Defensive secondary sweep - search the live page text for a
         // standalone seconds value near the racing UI. Caller is
         // responsible for only calling this in PRE_LAUNCH context.
         try {
@@ -3695,7 +4006,7 @@
     //   Illegal (all other tracks):
     //     15s: {FlagBearer} Is Ready
     //     10s: {FlagBearer} Raises The Flag
-    //      1s: {FlagBearer} Waves The Flag — Start!
+    //      1s: {FlagBearer} Waves The Flag
     //
     // For illegal races, the flag-bearer's gender is decided once per race
     // (at the first fired marker) and remembered for the rest of the
@@ -3718,7 +4029,7 @@
             const lines = {
                 15: fb + ' Is Ready',
                 10: fb + ' Raises The Flag',
-                1: fb + ' Waves The Flag \u2014 Start!'
+                1: fb + ' Waves The Flag'
             };
             pushLine(lines[marker], 'status', ICON.flag);
             return;
@@ -3746,7 +4057,7 @@
 
     function scrapeCar () {
         const text = getPageText();
-        // Method 1: broad regex — permissive, captures any car name format
+        // Method 1: broad regex - permissive, captures any car name format
         const m = text.match(/[Cc]urrent\s+[Cc]ar[:\s]+([^\n\r]{2,50})/);
         if (m) {
             const candidate = m[1].trim().split(/[|\t]/)[0].trim();
@@ -3835,7 +4146,7 @@
         return '';
     }
 
-    // Is this driver row currently the "focused" one — i.e. the user clicked
+    // Is this driver row currently the "focused" one - i.e. the user clicked
     // on this racer in Torn's list. Torn typically adds an active/expanded/selected
     // class to the row (and/or shows an expanded sub-panel).
     function isRowFocused (row) {
@@ -3880,7 +4191,7 @@
 
     // Heuristic fallback for Events-menu pollution that survives the structural
     // strip. Per spec: Torn's Events feed entries are prefixed with a recency
-    // counter (e.g. "1m", "2h", "5d", "30s") — that pattern is the reliable
+    // counter (e.g. "1m", "2h", "5d", "30s") - that pattern is the reliable
     // fingerprint for Events feed text. A real racer row never contains
     // "<digit>+<smhdw> <Word>" because driver rows show position + name only.
     // The "You" sentence pattern is also a strong tell, but is filtered too
@@ -3894,11 +4205,11 @@
 
     function scrapeRacers () {
         // This returns names and positions for leaderboard display and movement detection.
-        // Its .length is NOT used for racerCount — use scrapePosition().total for that.
+        // Its .length is NOT used for racerCount - use scrapePosition().total for that.
         const racers = [];
         const driverItems = document.querySelectorAll('ul.driver-item, ul[class*="driver-item"]');
         driverItems.forEach(function (ul, idx) {
-            // Skip rows inside Torn's Events / Messages / Awards dropdowns —
+            // Skip rows inside Torn's Events / Messages / Awards dropdowns -
             // those contain stale race result data that would corrupt the scrape.
             if (isInsideTornMenu(ul)) return;
             // Heuristic fallback: skip rows whose text reads like an Events feed
@@ -4001,7 +4312,7 @@
         }
         // Jail: the player is in jail (per spec v2.71). The page shows
         // "This page is not available while in jail". Same shape as the
-        // hospital lockout — single line, no further commentary until the
+        // hospital lockout - single line, no further commentary until the
         // page returns to a normal status. Match the stable substring
         // "while in jail" which is unique enough to not false-positive.
         if (/while\s+in\s+jail/i.test(text)) {
@@ -4042,12 +4353,12 @@
             return S.ENLISTED;
         }
         // Travel block: when the player is flying or abroad, Torn shows
-        // "This page is unavailable while you're traveling." — racing isn't
+        // "This page is unavailable while you're traveling." - racing isn't
         // possible during travel so return a dedicated UNAVAILABLE status.
         if (/this\s+page\s+is\s+unavailable\s+while\s+you'?re\s+travel(l)?ing/i.test(text)) {
             return S.UNAVAILABLE;
         }
-        // CRASHED detection (player) — text-based fallback. Per spec, look for
+        // CRASHED detection (player) - text-based fallback. Per spec, look for
         // the literal "You Crashed!" announcement on the page. This catches
         // the player's own crash even when the DOM markers haven't propagated
         // (or use a class scheme we don't recognise). The page text from
@@ -4091,7 +4402,7 @@
             // Activate CRASHED if the row's name matches the player. Fall back
             // to a substring check on the row's full text if the structured
             // selector didn't find a name (defends against Torn DOM tweaks).
-            if (state.playerName && state.playerName !== '—'
+            if (state.playerName && state.playerName !== '-'
                 && !NAME_BLACKLIST.test(state.playerName)) {
                 if (rowName === state.playerName) return S.CRASHED;
                 if (!rowName) {
@@ -4112,7 +4423,7 @@
         // mistaken for an in-progress race.
         //
         // Bug fix v2.70: a paused replay swaps the page text from
-        // "Race replaying" to "Race paused" (per spec clarification — "the
+        // "Race replaying" to "Race paused" (per spec clarification - "the
         // text shown is 'Race paused' instead of 'Race replaying'"). With
         // only the "race replay" check, the paused state fell through to
         // RACING and the auto-pause detection (gated on RACE_REPLAY) never
@@ -4120,7 +4431,7 @@
         // status stays RACE_REPLAY through the pause and the pause-detect
         // block in poll() picks it up and surfaces "Replay Paused". Note
         // that "Race paused" is specific enough to only appear in the
-        // replay context — no risk of false-matching during a live race.
+        // replay context - no risk of false-matching during a live race.
         if (/race\s+replay/i.test(text)
                 || /\brace\s+paused\b/i.test(text)
                 || document.querySelector('[class*="raceReplay"], [class*="race-replay"]')) {
@@ -4129,13 +4440,13 @@
         if (text.indexOf('Race started') !== -1 || document.querySelector('[class*="raceStarted"], [class*="raceInProgress"]')) return S.RACING;
         if (/not\s+enough\s+drivers/i.test(text)) {
             waitingSeenCount++;
-            // Require 2 consecutive polls to confirm WAITING — prevents false positives
+            // Require 2 consecutive polls to confirm WAITING - prevents false positives
             // from cached page text during navigation
             if (waitingSeenCount >= 2) return S.WAITING;
             // Return current status while waiting for confirmation
             return currentStatus === S.WAITING ? S.WAITING : (currentStatus || S.MENU);
         }
-        // Text no longer present — reset counter so WAITING can't persist
+        // Text no longer present - reset counter so WAITING can't persist
         waitingSeenCount = 0;
         const hasPRL = /race\s+will\s+start\s+in/i.test(text) || domContains(/race\s+will\s+start\s+in/i);
         if (hasPRL) {
@@ -4172,17 +4483,17 @@
         // While browsing car selection in MENU, or on the modifications/garage,
         // statistics, or enlisted-cars pages, the scraper can pick up unrelated
         // car-list entries and show them incorrectly in the display. Freeze the
-        // CAR display on those pages — keep whatever was last shown.
+        // CAR display on those pages - keep whatever was last shown.
         const carFrozenStatuses = [S.MENU, S.IN_GARAGE, S.STATISTICS, S.ENLISTED, S.RACE_REPLAY];
         if (newCar && carFrozenStatuses.indexOf(newStatus) === -1) state.car = newCar;
 
         if (posData) {
             state.position = posData.pos;
-            // *** ONLY source of racerCount — Position: X/Y from the page ***
+            // *** ONLY source of racerCount - Position: X/Y from the page ***
             // Always trust this value; it's the authoritative Torn count.
             if (posData.total > 0) {
                 state.racerCount = posData.total;
-                // Latch the maximum field size seen during the race — used for
+                // Latch the maximum field size seen during the race - used for
                 // the outro threshold so we wait for ALL racers to cross the line.
                 if (posData.total > state.raceFieldSize) {
                     state.raceFieldSize = posData.total;
@@ -4202,7 +4513,7 @@
                 if (focused.car) state.focusedCar = focused.car;
                 state.focusedPosition = String(focused.posNum || '');
             } else if (!focused) {
-                // No racer row is marked focused — clear the override so the
+                // No racer row is marked focused - clear the override so the
                 // display reverts to the real player.
                 state.focusedName = '';
                 state.focusedCar = '';
@@ -4212,7 +4523,7 @@
             state.prevRacers = prevRacersSnapshot;
             state.racers = newRacers;
             if (restoredIntoRacing) {
-                // Refreshed during a race — add all current racers to known set silently
+                // Refreshed during a race - add all current racers to known set silently
                 // then show a summary message once
                 newRacers.forEach(function (r) { knownRacerNames.add(r.name); });
                 if (isRacingLike(newStatus)) {
@@ -4264,11 +4575,11 @@
                 const totalNow = parseInt(parts[1], 10);
                 if (totalNow > 0) state.totalLaps = totalNow;
                 if (lapNumNow > 0 && lapNumNow > state.prevLapNumber) {
-                    // A new lap has just started — capture the previous lap's
+                    // A new lap has just started - capture the previous lap's
                     // time into the history BEFORE deciding commentary, so
                     // {delta} and {avgTime} reflect the freshly-completed lap.
                     if (state.prevLapNumber >= 1
-                        && state.lastLap && state.lastLap !== '—') {
+                        && state.lastLap && state.lastLap !== '-') {
                         const sec = parseLapTimeToSeconds(state.lastLap);
                         if (sec > 0) {
                             state.lapTimesSec.push(sec);
@@ -4287,7 +4598,7 @@
                         }
                         // Per spec v2.67: average cadence starts from lap 5,
                         // every 2-4 laps. Initialise nextAvgLapAt the moment
-                        // we reach lap 5 — first average fires AT lap 5.
+                        // we reach lap 5 - first average fires AT lap 5.
                         if (state.nextAvgLapAt === 0 && lapNumNow >= 5) {
                             state.nextAvgLapAt = lapNumNow;
                         }
@@ -4303,7 +4614,7 @@
                             // before pushLine, fill() computes avgComparison
                             // by diffing current avg against the just-overwritten
                             // value (diff = 0), returns empty string, and the
-                            // template renders ". ." at the end — the reported
+                            // template renders ". ." at the end - the reported
                             // double-stop bug. Deferring keeps fill() correct.
                             let pendingLastAvgSec = null;
 
@@ -4320,7 +4631,7 @@
                                     typeKey = 'lapTimeAverageFirst';
                                 } else {
                                     // Compute current average to decide which
-                                    // pool — Level (within 0.5s) or compared.
+                                    // pool - Level (within 0.5s) or compared.
                                     const arrSel = state.lapTimesSec;
                                     let totalSel = 0;
                                     for (let i = 0; i < arrSel.length; i++) totalSel += arrSel[i];
@@ -4339,7 +4650,7 @@
                                 // value here but DO NOT assign it yet. fill()
                                 // computes the {avgComparison} token by
                                 // diffing current avg against state.lastAvgSec
-                                // — if we overwrite lastAvgSec first, that
+                                // - if we overwrite lastAvgSec first, that
                                 // diff would always be zero and avgComparison
                                 // would return '', leaving the rendered line
                                 // ending in ". ." (the reported double-stop
@@ -4383,7 +4694,7 @@
                                 const picked = pickLine(pool, typeKey);
                                 pushLine(fill(picked), 'lapTime', ICON.stopwatch);
                             }
-                            // Now safe to commit the deferred average update —
+                            // Now safe to commit the deferred average update -
                             // fill() has already rendered using the previous
                             // value (see Bug fix v2.73 note above).
                             if (pendingLastAvgSec !== null) {
@@ -4395,13 +4706,13 @@
                 }
             }
         } else {
-            state.lastLap = '—';
-            state.currentLap = '—';
-            state.completion = '—';
+            state.lastLap = '-';
+            state.currentLap = '-';
+            state.completion = '-';
         }
 
         // Replay pause/resume detection (per spec v2.69). During RACE_REPLAY,
-        // Torn can pause the replay — page text shows "Race paused". When
+        // Torn can pause the replay - page text shows "Race paused". When
         // detected we auto-pause commentary and surface a "Replay Paused"
         // line. When "Race replaying" appears the auto-pause clears with a
         // "Replay Resumed" line. The replayPausedAuto flag is kept separate
@@ -4426,7 +4737,7 @@
                     pushLine('Replay Resumed', 'status');
                 }
             } else if (replayPausedAuto) {
-                // Left RACE_REPLAY status — clear silently. The user has
+                // Left RACE_REPLAY status - clear silently. The user has
                 // navigated away or the replay ended; no point firing a
                 // resume message in a different context.
                 replayPausedAuto = false;
@@ -4445,7 +4756,7 @@
 
         if (state.status === S.ENDED) processFinishers(scrapeFinishers());
 
-        // Scrape Torn's .status.crash DOM markers unconditionally each poll —
+        // Scrape Torn's .status.crash DOM markers unconditionally each poll -
         // catches crashes even if newRacers was briefly empty this tick,
         // and catches any crash already in the DOM after a page refresh.
         if (isRacingLike(state.status) || restoredIntoRacing) {
@@ -4454,7 +4765,7 @@
             // here too. This branch runs when scraping fails through the
             // primary leaderboard route (e.g. on a refresh during a race).
             detectOtherFinishers();
-            // Per spec v2.86: do NOT mutate state.racers — finishers stay
+            // Per spec v2.86: do NOT mutate state.racers - finishers stay
             // on the leaderboard with positions intact. Use getActiveRacers()
             // at commentary call sites for the filtered view.
         }
@@ -4472,7 +4783,7 @@
         const sv = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
         // If a racer is focused (user clicked their name in Torn's list),
         // show that racer's name/car/pos instead of the real player's.
-        const focusActive = !!(state.focusedName && state.focusedName !== '—');
+        const focusActive = !!(state.focusedName && state.focusedName !== '-');
         const displayName = focusActive ? state.focusedName : state.playerName;
         const displayCar = focusActive && state.focusedCar ? state.focusedCar : state.car;
         const displayPos = focusActive && state.focusedPosition
@@ -4482,7 +4793,7 @@
         sv('tc-ib-track', state.track);
         sv('tc-ib-car', displayCar);
         const posNum = parseInt(displayPos, 10);
-        sv('tc-ib-pos', posNum >= 1 ? ordinal(posNum) : '—');
+        sv('tc-ib-pos', posNum >= 1 ? ordinal(posNum) : '-');
         // Visual cue: a subtle marker next to the driver label when focus is on another racer.
         const driverLabel = document.getElementById('tc-ib-name');
         if (driverLabel) {
@@ -4585,7 +4896,7 @@
     //   - tracksOK or recordsOK true → Public key (these endpoints are
     //                   public and need no user-data scope)
     //   - Key entered but no flags yet → "Detecting…" (first poll hasn't
-    //                   returned, or the key is invalid — same UX either way
+    //                   returned, or the key is invalid - same UX either way
     //                   until enough time has passed)
     function refreshKeyDiagnostic () {
         const el = document.getElementById('tc-key-diag');
@@ -4629,7 +4940,7 @@
             lines.push(carsCache.cars.length + ' enlisted cars cached');
         }
 
-        // Build current-context detail (if available) — useful for
+        // Build current-context detail (if available) - useful for
         // "is this actually working" debugging without opening the console.
         const detail = [];
         const car = getPlayerCarData();
@@ -4637,7 +4948,7 @@
             detail.push('Current car: ' + escH(car.car_item_name || '?')
                 + ' (Class ' + escH(String(car.class || '?'))
                 + ', ' + (car.races_won || 0) + '/' + (car.races_entered || 0) + ' wins)');
-        } else if (key && state.car && state.car !== '\u2014' && carsCache) {
+        } else if (key && state.car && state.car !== '-' && carsCache) {
             detail.push('Current car (' + escH(state.car) + ') not matched in enlisted cars cache.');
         }
         const topRec = getTopTrackRecord();
@@ -4651,7 +4962,7 @@
         // Per spec v2.85: diagnostic for the proximity-scrape so the user
         // can see if the DOM-completion detection is working without
         // opening the console. Sample a live scrape and report counts.
-        // Only useful during racing — outside of races there are no rows.
+        // Only useful during racing - outside of races there are no rows.
         if (isRacingLike(state.status)) {
             try {
                 const comps = scrapeRacerCompletions();
@@ -4663,7 +4974,7 @@
                         + n + ' racers (threshold for ' + escH(state.track || '?')
                         + ': ' + thresholdTxt + ').');
                 } else if (n === 1) {
-                    detail.push('Proximity scrape: only 1 racer\u2019s % detected \u2014 '
+                    detail.push('Proximity scrape: only 1 racer\u2019s % detected - '
                         + 'need at least 2 for gap calculation. Proximity messages disabled.');
                 } else {
                     detail.push('Proximity scrape: no completion % detected. '
@@ -5002,7 +5313,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             updateScrollDirBtn();
             // Per spec v2.79: refresh the active-key diagnostic each time
             // settings is opened. Also kick off lazy fetches for any data
-            // we don't have yet — most useful when the user has JUST entered
+            // we don't have yet - most useful when the user has JUST entered
             // a key and wants to confirm it's working without waiting for
             // the next race tick to surface a flavour line.
             try {
@@ -5026,7 +5337,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             updateScrollDirBtn();
             saveState();
         });
-        // API key handling — populate the input with the currently-stored key
+        // API key handling - populate the input with the currently-stored key
         // (masked because the input is type="password") and wire the Save button.
         const apiInput = document.getElementById('tc-api-key');
         const apiStatus = document.getElementById('tc-api-status');
@@ -5087,7 +5398,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             }
             updatePauseBtn();
         });
-        // Throttle slider — set the persisted value and bind input handler.
+        // Throttle slider - set the persisted value and bind input handler.
         // Per spec v2.73: live update on input so the user sees the effect
         // immediately. No commentary message is fired on change (it's a
         // density control, not a state toggle).
@@ -5126,7 +5437,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                     lastSavedW = w; lastSavedH = h;
                     state.windowWidth = w;
                     state.windowHeight = h;
-                    // Don't call saveState() here on every observer fire — the next
+                    // Don't call saveState() here on every observer fire - the next
                     // poll() tick will pick it up via its own saveState().
                 }
             });
@@ -5179,7 +5490,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             try { fetchTracksFromApi(); } catch (_) {}
             // Per spec v2.79: hydrate keyAccessFlags from any existing
             // caches so the settings-page diagnostic reflects historical
-            // success across page refreshes — not just the current session.
+            // success across page refreshes - not just the current session.
             // Without this, the diagnostic would say "awaiting first response"
             // even when the user has perfectly valid week-old cached data.
             try {
