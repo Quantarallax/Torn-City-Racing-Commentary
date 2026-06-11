@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.1.0
+// @version      3.3.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.1.0';
+    const SCRIPT_VERSION = '3.3.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -308,6 +308,32 @@
                 'Police nearby, eyes scanning the crowd more than the cars.',
                 '{player} stretches their arms, loosening up for the off.',
                 'The PA cuts through the hum - final boarding call for race fans.',
+                // Per spec v3.2: telemetry/diagnostics flavour. The
+                // commentator's radio has a "wave length scanning device"
+                // that picks up paddock telemetry. 20 lines tying these
+                // words to vehicle condition or driver mood. COUNTDOWN
+                // context (pre-race), so it's pre-flight checks, idle
+                // readings, sensor sweeps - not in-action live data.
+                'Telemetry from {player}\'s car shows oil temp climbing nicely on idle.',
+                'Our scanner picks up diagnostics off {p2}\'s rig - all green.',
+                'Pre-flight diagnostics on {player}\'s {car} reading clean.',
+                'Telemetry suggests {p2} has dialled in stiffer rear springs today.',
+                'Live diagnostics off the grid: tyre pressures look spot on for {track}.',
+                'Our wave length scanner indicates {player} is calm. Heart rate steady.',
+                'Telemetry says {p3} is running rich. Last-minute carb tweak coming.',
+                'Diagnostics off {player}\'s car: ECU happy, no fault codes.',
+                'Scanner picks up cockpit telemetry - {p2}\'s hands are steady on the wheel.',
+                'Pre-race diagnostics across the grid: nothing untoward to report.',
+                'Telemetry from {player}\'s {car} suggests fresh brakes and clean lines.',
+                'Our paddock scanner pulls in suspension data - {p2}\'s rig is set firm.',
+                'Diagnostics on {player}\'s setup all green. Just the start to worry about.',
+                'Telemetry indicates {p3} is dialling in their gear ratios. Last-minute change.',
+                'Cockpit telemetry: {player}\'s breathing is steady. Focused.',
+                'Our scanner catches {p2}\'s engine note - sounds healthy and crisp.',
+                'Diagnostics suggest {player}\'s tyres are right in the sweet spot.',
+                'Telemetry off {p3} shows ambient brake temps. Ready for the off.',
+                'Scanner reading {player}\'s pulse - rising, naturally. The wait does that.',
+                'Pre-race diagnostics show {p2} ran a quick rev test. Sounds clean.',
                 '{p2} starts fighting {p3}.',
                 '{player} starts fighting {p2}.',
                 '{player} honks their horn in frustration.',
@@ -337,6 +363,33 @@
                 'Worth noting on {track}: {trackDesc}',
                 'They say of {track} - {trackDesc}'
             ],
+            // Per spec v3.3: race-timer milestone commentary. Fires when
+            // the COUNTDOWN remaining time crosses one of the configured
+            // thresholds (45min/30min/15min/5min/1min/30sec). 20 templates,
+            // each using {timeLeft} which gets filled per milestone. Each
+            // milestone fires at most once per race (firedMilestones map).
+            timerMilestones: [
+                '{timeLeft} until pre-launch. Hold tight.',
+                'Mark it - {timeLeft} until we go racing.',
+                'Official confirmation: {timeLeft} until the racers are released.',
+                'Just {timeLeft} to go before the lights come up.',
+                '{timeLeft} on the clock. Anticipation builds.',
+                'And we are now {timeLeft} from pre-launch.',
+                '{timeLeft} until the action starts. Get comfortable.',
+                'Race control: {timeLeft} remaining until pre-launch.',
+                'Heads up everyone - {timeLeft} until launch.',
+                '{timeLeft} now between us and the start.',
+                'Punters will want to know - {timeLeft} until things kick off.',
+                'Across the paddock, the call goes out: {timeLeft} to go.',
+                '{timeLeft} until pre-launch. The grid grows quieter.',
+                'Word from race control - {timeLeft} until the off.',
+                '{timeLeft} to go. Final preparations in the pit lane.',
+                'Tannoy crackles to life - {timeLeft} until pre-launch.',
+                '{timeLeft} on the timer. Nerves jangling for some.',
+                'Just {timeLeft} now until we are racing on {track}.',
+                '{timeLeft} to go before pre-launch. Engines stirring.',
+                'And the call: {timeLeft} remaining until the race begins.'
+            ],
             player: [
                 '{player} has settled into {pos} and holds their nerve.',
                 '{player} locked in and ready. Grid position secured.',
@@ -345,6 +398,34 @@
             ]
         },
         PRE_LAUNCH: {
+            // Per spec v3.2: one entry line fires when transitioning from
+            // COUNTDOWN to PRE_LAUNCH. Pool of 20 different "we are now in
+            // pre-launch" moments - crews finalising cars, doors slamming,
+            // engineers stepping back, drivers settling in. Picked once
+            // per pre-launch entry, then the regular ambient pool below
+            // takes over.
+            entryLines: [
+                'We are now in pre-launch. Race crews scrabble to finalise cars.',
+                'Pre-launch underway. Door slam as racers get comfortable.',
+                'Pre-launch begins. Engineers step back from the cars one by one.',
+                'Pre-launch announced. Final torque checks across the grid.',
+                'And we are into pre-launch. Drivers belted in, eyes forward.',
+                'Pre-launch underway. The last spanners come off the cars.',
+                'Pre-launch is on us. Crews wheeling tool boxes off the grid.',
+                'Pre-launch confirmed. Helmets buckled, visors snapping down.',
+                'Pre-launch begins. The pit lane empties of all but officials.',
+                'Pre-launch underway. Drivers double-checking belts and brakes.',
+                'We are in pre-launch. The final radio checks crackle through.',
+                'Pre-launch declared. Mechanics retreat behind the wall.',
+                'Pre-launch underway. A last gulp of water across the grid.',
+                'Pre-launch begins. Engines settle to their idle note.',
+                'And here we go - pre-launch. Last looks down the track from every cockpit.',
+                'Pre-launch confirmed. Marshals taking up their final positions.',
+                'Pre-launch underway. The pit boards come out one last time.',
+                'We are into pre-launch. Crews pat their drivers on the helmet.',
+                'Pre-launch begins. The PA goes silent. The wait is short now.',
+                'Pre-launch underway. Every driver checks their mirrors.'
+            ],
             ambient: [
                 'Not long now.',
                 'Tensions are rising.',
@@ -373,6 +454,46 @@
                 'The organisers stare at the empty grid. Come on, people.',
                 'Awkward silence. More drivers needed before we can race.',
                 'Someone in the stands shouts "Let\'s get going!" Not yet, friend.'
+            ]
+        },
+        // Per spec v3.3: OFFICIAL RACE extras pool. Merged into COUNTDOWN,
+        // PRE_LAUNCH, and RACING ambient ONLY when state.officialRacePending
+        // is set (which means the player came from the OFFICIAL_SIGNUP
+        // screen and hasn't yet finished the resulting race). Lines cover:
+        //   - the points structure (3/2/1 to top 3, nothing below)
+        //   - balanced class-A field, head-to-head jousting
+        //   - bands playing, celebrations, official atmosphere
+        //   - background Torn crimes around the crowd (pickpockets,
+        //     graffiting, arson, searching for cash)
+        // Tone is upbeat and "event day" - different from the gritty
+        // street-race feel that police/illegal pools bring.
+        OFFICIAL: {
+            ambient: [
+                'Reminder for the home viewers - three points for the win, two for second, one for third. Nothing below that.',
+                'An official points race today. Six class-A drivers, all on the same level.',
+                'A tight, balanced field. The kind that produces real wheel-to-wheel scraps.',
+                'Six matched drivers, three sets of points. This will get fierce.',
+                'Heads up - this is an official points-paying race. Every position matters in the top three.',
+                'A brass band strikes up near the main stand. Race day proper, this.',
+                'Local musicians warming up the crowd. Officials in full ceremony mode.',
+                'Bunting, banners, the official championship sponsors out in force.',
+                'Race officials in their crisp uniforms today. Proper occasion.',
+                'A celebrity grid walker doing the rounds. Big day for {track}.',
+                'The crowd in their proper Sunday best - or whatever the local equivalent is.',
+                'Confetti cannons primed near the podium. Someone is going to need them.',
+                'Pickpockets working the busy crowd at the far stand. As ever.',
+                'Police chasing a tagger - someone has graffitied the back of the press box.',
+                'Smoke rises from a small fire near the south gate. Arson, says race control.',
+                'A scuffle as someone is caught searching for cash in the bleachers.',
+                'Crime reports trickling in - a pickpocketing ring is active around the food trucks.',
+                'Fresh graffiti gets sprayed onto the perimeter wall during the chaos. Charming.',
+                'Police break up a fight over a wallet near the betting kiosks.',
+                'Someone tried setting fire to a portable loo. Marshalls have it under control.',
+                'Whispered word of more cash-searchers working the crowd. Eyes peeled.',
+                'Expect head-to-head jousting today - six drivers, no slow ones to lap.',
+                'No backmarkers in this race. Every overtake is for real points.',
+                'Officials have done their job - this field is brutally well matched.',
+                'A balanced field always means more contact. Watch for elbows out today.'
             ]
         },
         RACING: {
@@ -435,6 +556,63 @@
             // are dealing with elsewhere, helicopter overhead, crowd
             // control, or just absent police. Merged into RACING.ambient
             // only when the current track is illegal (see ambientPoolFor).
+            // Per spec v3.2: telemetry/diagnostics flavour for RACING.
+            // Same paddock-scanner conceit as the COUNTDOWN pool, but
+            // now reading live data while cars are on the move. 20 lines
+            // tying these words to in-race performance shifts. Merged
+            // into ambient on every track. {p1name} and {p2name} are NOT
+            // used here so the lines never require active proximity data;
+            // {player}, {p2}, {p3} resolve to whoever is currently in
+            // those positions.
+            telemetryRacing: [
+                'Telemetry off {player}\'s car shows rising oil temps. Worth watching.',
+                'Live diagnostics on {p2}: brakes running hot but still in range.',
+                'Our scanner picks up cleaner sector data from {player} this lap.',
+                'Telemetry suggests {p3} has just turned the engine up a notch.',
+                'Diagnostics show {p2} is leaning on the brakes harder than the rest.',
+                'Live telemetry off {player}\'s {car} - throttle traces look aggressive.',
+                'Scanner reading {p2}\'s pulse - dropping nicely. They\'re finding their rhythm.',
+                'Cockpit telemetry from {player} shows steady inputs. Calm under pressure.',
+                'Diagnostics catch a small wobble in {p3}\'s lap consistency. Manageable.',
+                'Telemetry from {player}: tyres holding temp beautifully through the corners.',
+                'Our scanner picks up suspension data - {p2} riding the kerbs harder now.',
+                'Live diagnostics show {player}\'s ECU pulling timing slightly. Heat soak.',
+                'Telemetry from {p2} suggests they\'re saving the engine for later.',
+                'Scanner indicates {p3}\'s brake bias is shifting forward. Adjusting on the fly.',
+                'Diagnostics show {player} carrying more entry speed through the right-handers.',
+                'Telemetry catches a brief slip from {p2} - corrected in milliseconds.',
+                'Live cockpit telemetry: {player}\'s breathing has settled into the race.',
+                'Scanner picks up gearbox traces - {p3} hitting the rev limiter occasionally.',
+                'Diagnostics off {player}\'s rig: fuel burn dead on target.',
+                'Telemetry off {p2} suggests their tyre strategy is going to plan.'
+            ],
+            // Per spec v3.2: Speedway-only cockpit-to-pits comms flavour.
+            // Not actual dialogue - impression-style lines summarising
+            // what the pit wall would be hearing. 20 lines, merged into
+            // RACING.ambient only when state.track === 'Speedway'. The
+            // logic for that merge lives in ambientPoolFor.
+            speedwayCockpit: [
+                'Cockpit to pits comms suggest a gear ratio problem for {player}.',
+                '{player} will be happy with the current telemetry information.',
+                'Pit wall radio chatter - {player}\'s engineer talking them through traffic.',
+                'Cockpit to pits: {player} reporting good balance through the banking.',
+                'Comms suggest {player} is querying their fuel target. Engineer reassures.',
+                '{p2}\'s engineer comes on the radio - brake temps holding firm.',
+                'Pit wall to {player}: tyre stint extended by a couple of laps.',
+                'Cockpit telemetry sent to pits - {player} is on their fastest lap so far.',
+                '{player}\'s engineer in their ear, calling out gaps to the cars ahead and behind.',
+                'Comms hint at a setup tweak request from {p2} for the next race.',
+                'Pit wall radio: {player} acknowledging "understood, pushing now".',
+                'Cockpit comms suggest {player} is comfortable with the current power maps.',
+                '{p2}\'s pit board flashes a target lap time - their engineer pleased on the radio.',
+                'Engineer to {player}: stay out, stay out, build the gap.',
+                'Cockpit to pits chatter - {player} reports the kerbs are a touch sharper today.',
+                'Pit wall calls a sector split to {p2}. Two tenths up.',
+                'Comms suggest {player} is querying tyre wear. Engineer says they\'re fine.',
+                'Quick exchange between {p2} and the pit wall - they\'re settling into a rhythm.',
+                'Engineer to {player}: focus on tyre management through the next stint.',
+                'Cockpit comms relay {player}\'s feedback - the car is "alive" today.'
+            ],
             police: [
                 'No police around. We are clear, ladies and gentlemen.',
                 'Police scanner indicates they are taking care of a hustling job across town.',
@@ -949,6 +1127,20 @@
     // 20 minutes during COUNTDOWN. Persisted as last-fired ms timestamp.
     let tMechAdvert = 0;
     const MECH_ADVERT_COOLDOWN_MS = 20 * 60 * 1000;
+
+    // Per spec v3.3: race-timer milestone commentary fires once per race
+    // when the COUNTDOWN remaining time crosses each threshold. Each
+    // milestone fires at most once per countdown (reset on race entry).
+    // Thresholds in seconds, paired with their human-readable phrasing.
+    const COUNTDOWN_MILESTONES = [
+        { sec: 45 * 60, label: 'Forty-five minutes' },
+        { sec: 30 * 60, label: 'Just over half an hour' },
+        { sec: 15 * 60, label: 'Fifteen minutes' },
+        { sec: 5 * 60,  label: 'Five minutes' },
+        { sec: 60,      label: 'One minute' },
+        { sec: 30,      label: 'Thirty seconds' }
+    ];
+    let firedMilestones = {};
 
     // Throttle slider (per spec v2.73): a 0-100 slider next to the Pause
     // button controls how dense the commentary is during RACING/RACE_REPLAY.
@@ -2171,7 +2363,27 @@
         // friendly track flavour can come from the countdown pool itself
         // (e.g. "[player] surveys the track conditions").
         if (statusLines === LINES.PRE_LAUNCH || statusLines === LINES.COUNTDOWN) {
+            // Per spec v3.3: official-race extras merge into COUNTDOWN
+            // and PRE_LAUNCH ambient when officialRacePending is set.
+            // Lines cover points structure, balanced field, bands and
+            // celebrations, plus background Torn crimes - all coloured
+            // for the formal-event feel of an official race.
+            if (state.officialRacePending
+                && LINES.OFFICIAL && Array.isArray(LINES.OFFICIAL.ambient)) {
+                out = out.concat(LINES.OFFICIAL.ambient);
+            }
             return out;
+        }
+        // Per spec v3.3: official-race extras merge into RACING ambient
+        // when officialRacePending is set (player came from sign-up
+        // screen and hasn't finished). Note that police pool is gated
+        // on illegal tracks while OFFICIAL is gated on the player's path
+        // into the race - they're independent and can both fire (though
+        // an "official" race on an illegal track is rare in Torn).
+        if (statusLines === LINES.RACING
+            && state.officialRacePending
+            && LINES.OFFICIAL && Array.isArray(LINES.OFFICIAL.ambient)) {
+            out = out.concat(LINES.OFFICIAL.ambient);
         }
         // Per spec v2.92: merge the police pool into RACING ambient when
         // the current track is illegal. This adds Torn-themed flavour
@@ -2182,6 +2394,21 @@
             && Array.isArray(statusLines.police)
             && isIllegalTrack(state.track)) {
             out = out.concat(statusLines.police);
+        }
+        // Per spec v3.2: merge the telemetry/diagnostics pool into RACING
+        // ambient on every track. Radio DJ's wave-length scanner picks
+        // up live diagnostic data; lines work for any race type.
+        if (statusLines === LINES.RACING
+            && Array.isArray(statusLines.telemetryRacing)) {
+            out = out.concat(statusLines.telemetryRacing);
+        }
+        // Per spec v3.2: Speedway-only cockpit-to-pits comms flavour.
+        // The Speedway is the only fully-legal sanctioned track; the
+        // cockpit-to-pits conceit fits an organised racing context only.
+        if (statusLines === LINES.RACING
+            && Array.isArray(statusLines.speedwayCockpit)
+            && state.track === 'Speedway') {
+            out = out.concat(statusLines.speedwayCockpit);
         }
         // Merge tier pool when present on the LINES section (only RACING has tiers).
         const tierKey = getRacerCountTierKey();
@@ -2768,6 +2995,29 @@
         const now = Date.now();
 
         if (st === S.COUNTDOWN) {
+            // Per spec v3.3: race-timer milestone commentary. Check the
+            // remaining countdown time and fire a one-shot line at each
+            // threshold crossing. scrapeCountdownSeconds parses the "X
+            // hours, Y minutes, Z seconds" text seen during COUNTDOWN.
+            // Only fires when the timer is AT OR BELOW the milestone AND
+            // we haven't fired that milestone yet this race. The check
+            // runs ahead of the normal ambient dispatch so milestones
+            // always land on time and aren't blocked by the ambient gap.
+            const secsLeft = scrapeCountdownSeconds();
+            if (secsLeft !== null && secsLeft > 0) {
+                for (let i = 0; i < COUNTDOWN_MILESTONES.length; i++) {
+                    const ms = COUNTDOWN_MILESTONES[i];
+                    if (secsLeft <= ms.sec && !firedMilestones[ms.sec]) {
+                        firedMilestones[ms.sec] = true;
+                        const tpl = pickLine(LINES.COUNTDOWN.timerMilestones, 'countdown');
+                        pushLine(
+                            fill(tpl).replace(/\{timeLeft\}/g, ms.label),
+                            'ambient'
+                        );
+                        break;
+                    }
+                }
+            }
             if (now >= tAmbient) {
                 // Per spec v3.1: every ambient tick in COUNTDOWN, give the
                 // mechanic-shop advert pool a chance to fire instead of a
@@ -2795,7 +3045,7 @@
                 tAmbient = now + COUNTDOWN_GAP + Math.random() * 30000;
             }
             if (now >= tPlayer) {
-                pushLine(fill(pickLine(LINES.COUNTDOWN.player, 'player')), 'player');
+                pushLine(fill(pickLine(LINES.COUNTDOWN.player, 'countdown')), 'player');
                 tPlayer = now + COUNTDOWN_GAP + Math.random() * 30000;
             }
         }
@@ -2829,7 +3079,7 @@
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
                 state.preLaunchMsgCount++;
             } else if (now >= tPlayer && state.preLaunchMsgCount < PRE_LAUNCH_MAX) {
-                pushLine(fill(pickLine(LINES.PRE_LAUNCH.player, 'player')), 'player');
+                pushLine(fill(pickLine(LINES.PRE_LAUNCH.player, 'preLaunch')), 'player');
                 tPlayer = now + PLAYER_GAP + Math.random() * 8000;
                 state.preLaunchMsgCount++;
             }
@@ -2894,8 +3144,18 @@
             // Per spec v2.86: use active racer count - finishers stay on the
             // leaderboard but shouldn't keep position-change commentary alive
             // when the active field has dropped below 2.
+            //
+            // Per spec v3.2 BUG FIX: also suppress position2/position3 lines
+            // once ANY racer has finished. These pools talk about "the
+            // leader" applying pressure on p2/p3, which presupposes the
+            // top of the field is still being actively contested. When
+            // positions 1 and 2 have crossed the line, the remaining
+            // racer is the LAST in actual race order, not the leader -
+            // firing leader-themed lines then is just wrong. Proximity,
+            // funny, and lonely-finish pools take over instead.
             const activeCount = getActiveRacers().length;
-            if (now >= tPosition && now >= tPosCooldown && activeCount >= 2 && !lonely) {
+            const noFinishers = (state.finishers || []).length === 0;
+            if (now >= tPosition && now >= tPosCooldown && activeCount >= 2 && !lonely && noFinishers) {
                 if (bigRaceShouldShow()) {
                     if (isThreePlusRace()) {
                         // 3+ racers confirmed from Position: X/Y - safe to use position3 lines
@@ -3577,6 +3837,10 @@
                 // Per spec v2.92: clear start-position snapshot. It gets
                 // populated on the first RACING tick (see snapshotStartPositions).
                 racersAtStart = {};
+                // Per spec v3.3: reset countdown timer milestones so the
+                // next race fires its own clean sequence. Milestones are
+                // session-only and not persisted.
+                firedMilestones = {};
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -3631,6 +3895,14 @@
             pushLine('Engines are revving - not long until launch.', 'status', ICON.prelaunch);
             if (oldSt === S.COUNTDOWN) {
                 pushLine('We are now in Pre-Launch.', 'status', ICON.prelaunch);
+                // Per spec v3.2: one entry line from the 20-template pool
+                // describing the moment we enter pre-launch (crews
+                // finalising cars, doors slamming, engineers stepping
+                // back). Uses the preLaunch typeKey so it shares the
+                // 20-line repeat window with the rest of pre-launch.
+                if (LINES.PRE_LAUNCH.entryLines && LINES.PRE_LAUNCH.entryLines.length) {
+                    pushLine(pickLine(LINES.PRE_LAUNCH.entryLines, 'preLaunch'), 'ambient');
+                }
             }
         }
         if (newSt === S.WAITING) {
@@ -3687,10 +3959,22 @@
             const tn = state.track !== '-' ? state.track : 'this circuit';
             pushLine('Replay rolling - race action on ' + tn + '!', 'status', ICON.flag);
         }
-        if (newSt === S.CRASHED) fireCrashSequence();
+        if (newSt === S.CRASHED) {
+            fireCrashSequence();
+            // Per spec v3.3: clear the official-race flag when the player
+            // crashes out - the race is effectively over for them, no
+            // points to be earned, and the next race shouldn't inherit
+            // official-event flavour.
+            state.officialRacePending = false;
+        }
         if (newSt === S.MENU && oldSt !== S.MENU) {
             clearFeed();
             pushLine('Back in the pits. Select a race to get started.', 'status', ICON.pits);
+            // Per spec v3.3: also clear the official-race flag when the
+            // player returns to MENU. Covers paths like "saw OFFICIAL
+            // sign-up, didn't pick a race, went back to menu" so a
+            // subsequent regular race doesn't get official-event lines.
+            state.officialRacePending = false;
         }
         if (newSt === S.ENDED) {
             state.completion = '100%';
@@ -3950,6 +4234,44 @@
         }
     }
 
+    // Per spec v3.2: official-race points commentary. Fires once after the
+    // player cross-line message in an ENDED state, but only if (a) the race
+    // was an official one (officialRacePending was set on entry) AND (b)
+    // the player finished in the top 3 (where points are awarded). Token
+    // {points} is filled per template based on position: 3/2/1. Pool of 20
+    // variants gives the line freshness across many official races.
+    const OFFICIAL_POINTS_LINES = [
+        '{player} pockets {points} racing points for that finish.',
+        'A solid {points}-point haul for {player} from this official race.',
+        '{points} points to {player} for taking {pos}. Climbing the table.',
+        'The official board awards {player} {points} racing points.',
+        '{player} banks {points} points. Every official race counts.',
+        'And {points} points for {player} - exactly what they came here for.',
+        'Officials confirm: {player} earns {points} racing points today.',
+        'A useful {points} points added to {player}\'s tally.',
+        '{player} walks away with {points} racing points from this one.',
+        '{points} points secured by {player} for that {pos} finish.',
+        'Tallying up: {points} more racing points for {player}.',
+        '{player} bags {points} points - the official table will thank them.',
+        'And the scoreboard gives {player} a tidy {points} points.',
+        'For {pos}, {player} collects {points} racing points.',
+        '{points} points to {player}. Official racing pays off again.',
+        'The bell tolls for {pos} - {points} points to {player}.',
+        '{player} scores {points} racing points for that effort.',
+        'Officials credit {player} with {points} racing points.',
+        '{points} points for {player}. Another step up the rankings.',
+        'And {player} adds {points} racing points to their season tally.'
+    ];
+
+    // Resolve points awarded for a given finishing position. Per spec
+    // v3.1/v3.2: 3 for 1st, 2 for 2nd, 1 for 3rd, nothing for the rest.
+    function officialPointsForPosition (pos) {
+        if (pos === 1) return 3;
+        if (pos === 2) return 2;
+        if (pos === 3) return 1;
+        return 0;
+    }
+
     function processFinishers (scraped) {
         // Per spec rewrite: this function is now PLAYER-ONLY. We do NOT print
         // finish-line lines for other racers. We watch only for the player's
@@ -3984,6 +4306,27 @@
                 pname + ' crosses the finish line in ' + ordinal(playerFinish.pos) + '!',
                 'finish', ICON.flag
             );
+            // Per spec v3.2: official-race points commentary. Fires once,
+            // right after the player cross-line, when this was an official
+            // race and the player landed in the top 3. Pool of 20 variants
+            // resolved with {points} = 3/2/1 by finishing position. The
+            // officialRacePending flag is set on the OFFICIAL_SIGNUP screen
+            // and consumed here.
+            if (state.officialRacePending) {
+                const pts = officialPointsForPosition(playerFinish.pos);
+                if (pts > 0) {
+                    const tpl = pickLine(OFFICIAL_POINTS_LINES, 'officialFlavour');
+                    pushLine(
+                        tpl.replace(/\{player\}/g, pname)
+                           .replace(/\{points\}/g, String(pts))
+                           .replace(/\{pos\}/g, ordinal(playerFinish.pos)),
+                        'finish'
+                    );
+                }
+                // Consume the flag whether or not points were awarded -
+                // the next race shouldn't inherit official-race wording.
+                state.officialRacePending = false;
+            }
         }
 
         // Fire the 4-line outro sequence with 1-second pauses between lines.
