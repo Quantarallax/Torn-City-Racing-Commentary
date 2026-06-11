@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.4.1
+// @version      3.4.2
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.4.1';
+    const SCRIPT_VERSION = '3.4.2';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -2850,8 +2850,18 @@
                 return 'running well';
             })(),
             // {carWeakness}: opposite of {carStrength} - surfaces a "low"
-            // attribute the current track would punish. Empty when no car
-            // data or no concerning low attribute.
+            // attribute the current track would punish. Mirrors the
+            // {carStrength} fallback chain so it NEVER returns empty when
+            // car data exists.
+            //
+            // Per spec v3.4.2 BUG FIX: previous logic returned '' when no
+            // low attribute on a track-relevant axis. Templates like
+            // "{carWeakness} for {player}'s {car}." then rendered with a
+            // leading empty token: " for Sanxion's Colina Tanprice." Same
+            // shape for "The {car} has {carWeakness}." → "...has ." with
+            // the missing word. Both are reported bugs on Parkland and
+            // likely affect any track/car combo where no clearly-low
+            // attribute exists.
             carWeakness: (function () {
                 const attrs = getPlayerCarAttrs();
                 if (!attrs) return '';
@@ -2864,20 +2874,58 @@
                     dirt: 'no setup for the rough stuff',
                     tarmac: 'tarmac grip a worry'
                 };
-                // Which low attribute matters MOST on this track?
+                // Phase 1: track-relevant LOW attributes (highest priority -
+                // a weakness on a track that punishes it is the most
+                // newsworthy thing to mention).
                 if (tags.mud && attrs.dirt && attrs.dirt.level === 'low') return phrases.dirt;
                 if (tags.tarmac && attrs.tarmac && attrs.tarmac.level === 'low') return phrases.tarmac;
                 if ((tags.straights || tags.fast) && attrs.top_speed && attrs.top_speed.level === 'low') return phrases.top_speed;
                 if ((tags.hairpins || tags.brakingFocus) && attrs.braking && attrs.braking.level === 'low') return phrases.braking;
                 if ((tags.twisty || tags.handlingFocus) && attrs.handling && attrs.handling.level === 'low') return phrases.handling;
                 if (tags.accelFocus && attrs.acceleration && attrs.acceleration.level === 'low') return phrases.acceleration;
-                return '';
+                // Phase 2: ANY low attribute (track-irrelevant but still a
+                // legitimate weakness to mention). Iterate the phrase keys
+                // in a sensible order so the most race-impactful weakness
+                // surfaces first.
+                const fallbackOrder = ['handling', 'braking', 'acceleration', 'top_speed', 'tarmac', 'dirt'];
+                for (let i = 0; i < fallbackOrder.length; i++) {
+                    const k = fallbackOrder[i];
+                    if (attrs[k] && attrs[k].level === 'low') return phrases[k];
+                }
+                // Phase 3: pick the LOWEST raw value across the attributes
+                // we have phrases for. Catches the all-medium-or-better
+                // case (well-upgraded car) where there's no "low" but
+                // some attribute is still relatively weakest.
+                let worstKey = null;
+                let worstValue = Infinity;
+                const phraseKeys = Object.keys(phrases);
+                for (let i = 0; i < phraseKeys.length; i++) {
+                    const k = phraseKeys[i];
+                    if (attrs[k] && typeof attrs[k].value === 'number' && attrs[k].value < worstValue) {
+                        worstValue = attrs[k].value;
+                        worstKey = k;
+                    }
+                }
+                if (worstKey) return phrases[worstKey];
+                // Phase 4: generic phrase so the sentence still parses.
+                // Mirrors carStrength's "running well" final fallback.
+                return 'a little room for improvement';
             })(),
-            // {raceRecord}: short "won X of Y" phrase. Empty when no data.
+            // {raceRecord}: short "won X of Y" phrase. Falls back to a
+            // generic phrase rather than empty so templates using this
+            // token render cleanly even for fresh cars or zero-races
+            // entries.
+            //
+            // Per spec v3.4.2 BUG FIX: previous '' return caused templates
+            // like "{player} carrying {raceRecord} into this one." to
+            // render with a visible double-space hole.
             raceRecord: (function () {
                 const attrs = getPlayerCarAttrs();
-                if (!attrs || !attrs.races_entered) return '';
-                return attrs.races_won + ' wins from ' + attrs.races_entered + ' races';
+                if (!attrs) return 'fresh form';
+                const entered = attrs.races_entered || 0;
+                const won = attrs.races_won || 0;
+                if (entered === 0) return 'fresh form';
+                return won + ' wins from ' + entered + ' races';
             })()
         }, extras || {});
         return tpl.replace(/\{(\w+)\}/g, function (_, k) {
@@ -3023,6 +3071,35 @@
     function pushLine (text, type, icon, isHtml) {
         const alwaysShow = (type === 'status' || type === 'finish' || type === 'outro' || type === 'crash');
         if ((commentaryPaused || replayPausedAuto) && !alwaysShow) return;
+        // Per spec v3.4.2 BUG FIX: defensive sanity-check for malformed
+        // lines produced by tokens that resolved to empty string. The
+        // carWeakness fallback chain now prevents the known cases but
+        // other tokens (raceRecord etc.) can still return '' legitimately.
+        // We catch three failure modes here so they never reach the feed:
+        //   1. Empty / whitespace-only string after fill substitution.
+        //   2. Leading whitespace (token resolved empty at start of line),
+        //      detectable as a string starting with a space then a
+        //      lower-case continuation - "{empty} for X" → " for X".
+        //   3. Verb-then-period patterns ("has .", "is .", "with .") that
+        //      indicate an empty token sat between verb and full-stop.
+        // Status/finish/outro/crash lines are never built from fill() so
+        // they're whitelisted to avoid false positives.
+        if (!alwaysShow && typeof text === 'string' && !isHtml) {
+            const trimmed = text.replace(/^\s+/, '');
+            if (!trimmed) return;
+            // Detect malformed empty-token signatures only on non-trimmed
+            // text so we don't strip legitimate leading whitespace usage.
+            if (/^\s+\S/.test(text)) {
+                text = trimmed;
+            }
+            if (/\b(is|has|with|brings|carries|shows)\s+\.\s/.test(text)
+                || /\b(is|has|with|brings|carries|shows)\s+\.$/.test(text)) {
+                if (typeof console !== 'undefined' && console.warn) {
+                    console.warn('[RaceCommentary] rejected malformed line:', text);
+                }
+                return;
+            }
+        }
         feedLines.push({ text: text, type: type, icon: icon || '', isHtml: !!isHtml });
         if (feedLines.length > MAX_FEED) feedLines.shift();
         appendToFeed(text, type, icon || '', isHtml);
