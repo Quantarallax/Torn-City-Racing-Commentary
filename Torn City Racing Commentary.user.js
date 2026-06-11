@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.0.3
+// @version      3.1.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.0.3';
+    const SCRIPT_VERSION = '3.1.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -52,6 +52,21 @@
     const STALE_NAME_LEAK_PATTERN = /^\s*(Position|Name|Player|Track|Car|Lap|Last|Status|Score|Points|Driver|Racer|Class|Time|Rank|Place|None|Unknown|Loading)\s+(has\s+joined|rolls\s+onto|drives\s+onto|joins|crosses|attempts|is\s+|appears|pulls|swerves|bumps|scrapes|fiddles|honks|revs|starts|moves|sits|threads)/i;
     const MAX_FEED = 150;
     const REPEAT_WINDOW = 10;
+
+    // Per spec v3.1: COUNTDOWN and PRE-LAUNCH should keep messages varied
+    // across a wider window (20 lines) since the player is parked there for
+    // longer and repeats stick out more. RACING and other statuses keep the
+    // standard 10-line window to allow flavour to recycle naturally.
+    const REPEAT_WINDOW_LONG = 20;
+    function getRepeatWindowFor (typeKey) {
+        // Pre-race type keys (countdown ambient/player, pre-launch ambient).
+        // Anything matching gets the wider 20-line lookback.
+        if (typeKey === 'countdown' || typeKey === 'preLaunch'
+            || typeKey === 'mechAdvert' || typeKey === 'officialFlavour') {
+            return REPEAT_WINDOW_LONG;
+        }
+        return REPEAT_WINDOW;
+    }
 
     // ─── Track API integration ────────────────────────────────────────────────────
     // Per spec: hit https://api.torn.com/v2/racing/tracks and match the scraped
@@ -143,7 +158,12 @@
         ALREADY_STARTED: 'ALREADY_STARTED', RACE_FULL: 'RACE_FULL',
         NOT_ENOUGH_FUNDS: 'NOT_ENOUGH_FUNDS', NOT_ALLOWED: 'NOT_ALLOWED',
         TORN_DOWN: 'TORN_DOWN', IN_GARAGE: 'IN_GARAGE',
-        STATISTICS: 'STATISTICS', ENLISTED: 'ENLISTED'
+        STATISTICS: 'STATISTICS', ENLISTED: 'ENLISTED',
+        // Per spec v3.1: official-race sign-up screen. Detected by the
+        // "Would you like to join a race?" text. Single "Points to be won"
+        // line fires once, then the screen moves on to WAITING/COUNTDOWN
+        // for the actual race. The HUD shows "OFFICIAL RACE SIGN UP".
+        OFFICIAL_SIGNUP: 'OFFICIAL_SIGNUP'
     };
 
     // Statuses where commentary is suppressed entirely after the entry message(s).
@@ -152,7 +172,11 @@
     const QUIET_STATUSES = [
         'CRASHED', 'UNAVAILABLE', 'HOSPITAL', 'JAIL', 'TIMED_OUT',
         'ALREADY_STARTED', 'RACE_FULL', 'NOT_ENOUGH_FUNDS', 'NOT_ALLOWED',
-        'TORN_DOWN', 'IN_GARAGE', 'STATISTICS', 'ENLISTED'
+        'TORN_DOWN', 'IN_GARAGE', 'STATISTICS', 'ENLISTED',
+        // Per spec v3.1: official-race sign-up. One-shot "Points to be won
+        // here..." line fires on status entry, then silent until the user
+        // clicks a button and the screen changes.
+        'OFFICIAL_SIGNUP'
     ];
 
     // RACE_REPLAY behaves identically to RACING for commentary, position
@@ -196,6 +220,59 @@
     }
 
     // ─── Commentary banks ─────────────────────────────────────────────────────────
+    // Per spec v3.1: API CONNECT TO MECHANIC SHOPS AND CAR DEALERSHIPS
+    // (https://api.torn.com/v2/company/?type=30 for mechanic, type=4 for
+    // car dealership). The real API integration is deferred pending more
+    // info; in the meantime we use dummy data to show the flavour. When
+    // the real API is wired in, replace MECH_SHOP_DUMMIES with the fetched
+    // list of player-run shops that are HIRING. Each entry needs:
+    //   name      - the shop name shown in the advert
+    //   stars     - star rating 1-10 (used in radio-DJ-style copy)
+    //   owner     - the player who runs it (used occasionally for flavour)
+    //
+    // Adverts fire from the COUNTDOWN ambient flow at most once every 20
+    // minutes (MECH_ADVERT_COOLDOWN_MS) via the mechAdvert type-key in
+    // pickLine, which uses the 20-line REPEAT_WINDOW_LONG so different
+    // templates pair with different shops over a long session.
+    const MECH_SHOP_DUMMIES = [
+        { name: 'Big Al\'s Tune-Up Garage', stars: 10, owner: 'BigAl' },
+        { name: 'Spark Plug Sammy\'s', stars: 8, owner: 'Sammy' },
+        { name: 'Torn City Speed Shop', stars: 9, owner: 'Vince' },
+        { name: 'Greasy Tina\'s', stars: 7, owner: 'Tina' },
+        { name: 'Wrench & Roll', stars: 10, owner: 'Mike' },
+        { name: 'Downtown Mods', stars: 6, owner: 'Lou' },
+        { name: 'Nitro Annie\'s', stars: 9, owner: 'Annie' },
+        { name: 'Chrome Cathedral', stars: 8, owner: 'Reggie' },
+        { name: 'The Boost Bunker', stars: 10, owner: 'Dax' },
+        { name: 'Pistons & Pints', stars: 7, owner: 'Maureen' }
+    ];
+
+    const MECH_ADVERT_TEMPLATES = [
+        'And a word from our sponsors - {shopName}, {stars} star service, and they are hiring! Get down there.',
+        'Need your ride dialled in? {shopName} is your shop. {stars} star rated, and looking for new hands.',
+        'Brought to you by {shopName} - {stars} star tuning and currently hiring. Tell them KZYM sent you.',
+        'If your engine is whining, get yourself over to {shopName}. {stars} star reputation, and yes, they are hiring.',
+        'Hey racers - {shopName} is on the lookout for mechanics. {stars} star outfit. Solid place to learn the trade.',
+        'Quick shout out to {shopName} - {stars} stars and counting. They have openings, get your CV in.',
+        'When the dust settles, {shopName} will get you race-ready again. {stars} star shop, hiring now.',
+        '{shopName} - the {stars} star garage Torn talks about. Recruiting today.',
+        'Sponsorship corner: {shopName}, run by {owner}, {stars} star rated, taking on staff this week.',
+        'And we are told {shopName} is hiring mechanics. {stars} stars - one of the best in town.'
+    ];
+
+    // pickMechAdvert: returns a filled advert string using a random dummy
+    // shop and a non-recently-repeated template (20-line window via the
+    // mechAdvert type-key). Returns null if there are no dummies.
+    function pickMechAdvert () {
+        if (!MECH_SHOP_DUMMIES.length) return null;
+        const shop = MECH_SHOP_DUMMIES[Math.floor(Math.random() * MECH_SHOP_DUMMIES.length)];
+        const template = pickLine(MECH_ADVERT_TEMPLATES, 'mechAdvert');
+        return template
+            .replace(/\{shopName\}/g, shop.name)
+            .replace(/\{stars\}/g, String(shop.stars))
+            .replace(/\{owner\}/g, shop.owner);
+    }
+
     const LINES = {
         COUNTDOWN: {
             ambient: [
@@ -206,6 +283,32 @@
                 'Crews standing by. Tension already building.',
                 'The calm before the storm. {track} is ready and waiting.',
                 'Silence across the grid. Every driver deep in focus.',
+                // Per spec v3.1: more believable paddock atmosphere -
+                // last-minute prep, drivers physically present, mechanics
+                // doing final touches, normal radio chatter and banter.
+                '{player} sits on the bonnet of their car, breathing in the track.',
+                '{p2} sits on the bonnet of their car, breathing in the track.',
+                'Last minute modifications and tuning across the paddock.',
+                'Mechanics swarming the cars for one final check.',
+                '{player} fiddles with the wheel for the tenth time.',
+                'A spanner clatters on concrete in the {player} pit.',
+                'Final tyre pressures being set. Crews look anxious.',
+                '{p2} chats with their chief mechanic at the driver door.',
+                'The radio hisses with last-minute team chatter.',
+                'A mechanic gives {player} a thumbs up. All systems set.',
+                'Quiet banter across pit row. Old rivalries, fresh nerves.',
+                '{player} climbs out for one last walk around the car.',
+                'Crew chief leans into {p2}\'s cockpit for a final word.',
+                'Toolboxes snapping shut up and down the lane.',
+                'Engineers tap clipboards, double-checking everything.',
+                'A trolley jack rolls past, the work all but done.',
+                '{p2} adjusts their mirrors one more time.',
+                'Race control radio crackles through the paddock speakers.',
+                'A photographer leans low for the shot of {player} on the grid.',
+                'Police nearby, eyes scanning the crowd more than the cars.',
+                '{player} stretches their arms, loosening up for the off.',
+                'The PA cuts through the hum - final boarding call for race fans.',
+                '{p2} starts fighting {p3}.',
                 '{player} starts fighting {p2}.',
                 '{player} honks their horn in frustration.',
                 '{player} revs their engine, upping the temperature.',
@@ -760,6 +863,11 @@
         prevRacers: [],
         finishers: [],
         outroShown: false,
+        // Per spec v3.1: set when the player has just seen the OFFICIAL
+        // RACE SIGN UP screen. The next race they enter is then treated
+        // as an official 6-driver class-A points race. Cleared when the
+        // race ends or the player returns to the menu without racing.
+        officialRacePending: false,
         lastLap: '-',
         currentLap: '-',
         // prevLapNumber: the lap number we last saw on this race. Used to
@@ -837,6 +945,10 @@
     let tFunny = 0;
     let tWaiting = 0;
     let tPosCooldown = 0;
+    // Per spec v3.1: mechanic-shop radio adverts fire at most once every
+    // 20 minutes during COUNTDOWN. Persisted as last-fired ms timestamp.
+    let tMechAdvert = 0;
+    const MECH_ADVERT_COOLDOWN_MS = 20 * 60 * 1000;
 
     // Throttle slider (per spec v2.73): a 0-100 slider next to the Pause
     // button controls how dense the commentary is during RACING/RACE_REPLAY.
@@ -1972,7 +2084,7 @@
         const available = effectivePool.filter(function (l) { return recent.indexOf(l) === -1; });
         const source = available.length > 0 ? available : effectivePool;
         const chosen = source[Math.floor(Math.random() * source.length)];
-        recentByType[typeKey] = recent.concat([chosen]).slice(-REPEAT_WINDOW);
+        recentByType[typeKey] = recent.concat([chosen]).slice(-getRepeatWindowFor(typeKey));
         return chosen;
     }
 
@@ -2049,13 +2161,16 @@
     function ambientPoolFor (statusLines) {
         if (!statusLines || !Array.isArray(statusLines.ambient)) return [];
         let out = statusLines.ambient;
-        // Per spec v2.88 BUG FIX: characteristic-pool lines are written in
-        // active-racing voice ("the straights are eating up the laps",
-        // "the cars are scrambling for grip") and read wrong when fired
-        // during PRE_LAUNCH where nothing is actually moving yet. Skip the
-        // merge entirely for PRE_LAUNCH - its dedicated pre-race ambient
-        // pool already covers the tension/anticipation theme.
-        if (statusLines === LINES.PRE_LAUNCH) {
+        // Per spec v2.88 BUG FIX (extended in v3.1): characteristic-pool
+        // lines are written in active-racing voice ("the straights are
+        // eating up the laps", "A car comes past, its bodywork barely
+        // visible under the mud") and read wrong during PRE_LAUNCH or
+        // COUNTDOWN where nothing is actually moving yet. Skip the merge
+        // entirely for both statuses - their dedicated pre-race ambient
+        // pools cover the tension/anticipation theme. Reworded countdown-
+        // friendly track flavour can come from the countdown pool itself
+        // (e.g. "[player] surveys the track conditions").
+        if (statusLines === LINES.PRE_LAUNCH || statusLines === LINES.COUNTDOWN) {
             return out;
         }
         // Per spec v2.92: merge the police pool into RACING ambient when
@@ -2654,11 +2769,29 @@
 
         if (st === S.COUNTDOWN) {
             if (now >= tAmbient) {
-                const picked = pickLine(ambientPoolFor(LINES.COUNTDOWN), 'ambient');
-                // If this line uses the full description text, latch the 20-min
-                // throttle so apiAmbient lines can't fire again until it expires.
-                if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
-                pushLine(fill(picked), 'ambient');
+                // Per spec v3.1: every ambient tick in COUNTDOWN, give the
+                // mechanic-shop advert pool a chance to fire instead of a
+                // normal ambient line, gated by a 20-minute cooldown so it
+                // stays special rather than spammy. Roughly 1 in 5 ambient
+                // ticks tries the advert path; if cooldown still active,
+                // falls through to the regular ambient pool.
+                let advertFired = false;
+                if (now - tMechAdvert >= MECH_ADVERT_COOLDOWN_MS
+                    && Math.random() < 0.20) {
+                    const advert = pickMechAdvert();
+                    if (advert) {
+                        pushLine(advert, 'ambient');
+                        tMechAdvert = now;
+                        advertFired = true;
+                    }
+                }
+                if (!advertFired) {
+                    const picked = pickLine(ambientPoolFor(LINES.COUNTDOWN), 'countdown');
+                    // If this line uses the full description text, latch the 20-min
+                    // throttle so apiAmbient lines can't fire again until it expires.
+                    if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
+                    pushLine(fill(picked), 'ambient');
+                }
                 tAmbient = now + COUNTDOWN_GAP + Math.random() * 30000;
             }
             if (now >= tPlayer) {
@@ -2690,7 +2823,7 @@
                 // Route through ambientPoolFor() so the characteristic-derived
                 // pool (mud/tarmac/docks/etc.) gets merged in alongside the
                 // base PRE_LAUNCH ambient lines.
-                const picked = pickLine(ambientPoolFor(LINES.PRE_LAUNCH), 'ambient');
+                const picked = pickLine(ambientPoolFor(LINES.PRE_LAUNCH), 'preLaunch');
                 if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
                 pushLine(fill(picked), 'ambient');
                 tAmbient = now + AMBIENT_GAP + Math.random() * 15000;
@@ -3644,6 +3777,19 @@
             pushLine(fill("{player}'s cars glimmer in their garage."), 'status');
             pushLine('Now... which one to use.', 'status');
         }
+        // Per spec v3.1: OFFICIAL RACE SIGN UP entry message + flag-set.
+        // The "Points to be won here" line fires once when the screen
+        // appears. Setting state.officialRacePending = true means the next
+        // race transition (into WAITING/COUNTDOWN/PRE_LAUNCH) is treated as
+        // an official race and can carry extra points-themed flavour. The
+        // flag is cleared on race-finished or back-to-menu so it doesn't
+        // leak into the following non-official race.
+        if (newSt === S.OFFICIAL_SIGNUP && oldSt !== S.OFFICIAL_SIGNUP) {
+            clearFeed();
+            pushLine('Points to be won here. Should be a balanced field of racers. Good luck!', 'status');
+            state.officialRacePending = true;
+            saveState();
+        }
     }
 
     // ─── Finishers ────────────────────────────────────────────────────────────────
@@ -4351,6 +4497,15 @@
         if (/while\s+in\s+jail/i.test(text)) {
             return S.JAIL;
         }
+        // Per spec v3.1: OFFICIAL RACE SIGN UP. Detected by the welcome
+        // text shown on the screen where the player opts into an official
+        // class-A race for points. Matched on a distinctive substring so
+        // any localisation tweaks still trip it. Checked BEFORE the generic
+        // race-status detections so it wins when both could match.
+        if (/automatically\s+matched\s+with\s+other\s+class/i.test(text)
+            || /participating\s+in\s+official\s+racing\s+events/i.test(text)) {
+            return S.OFFICIAL_SIGNUP;
+        }
         // Race timed out: a previous race attempt failed to start
         if (/your\s+last\s+race\s+timed\s+out\s+at/i.test(text)) {
             return S.TIMED_OUT;
@@ -4857,7 +5012,9 @@
             [S.TORN_DOWN]: { label: 'RECONNECTING TO RACETRACK', cls: 'st-torndown' },
             [S.IN_GARAGE]: { label: 'IN GARAGE', cls: 'st-garage' },
             [S.STATISTICS]: { label: 'STATISTICS', cls: 'st-stats' },
-            [S.ENLISTED]: { label: 'ENLISTED CARS', cls: 'st-enlisted' }
+            [S.ENLISTED]: { label: 'ENLISTED CARS', cls: 'st-enlisted' },
+            // Per spec v3.1: bespoke HUD label for the official sign-up screen
+            [S.OFFICIAL_SIGNUP]: { label: 'OFFICIAL RACE SIGN UP', cls: 'st-official' }
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
