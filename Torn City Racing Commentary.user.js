@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.3.0
+// @version      3.4.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.3.0';
+    const SCRIPT_VERSION = '3.4.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -296,7 +296,7 @@
                 '{p2} chats with their chief mechanic at the driver door.',
                 'The radio hisses with last-minute team chatter.',
                 'A mechanic gives {player} a thumbs up. All systems set.',
-                'Quiet banter across pit row. Old rivalries, fresh nerves.',
+                'Quiet banter from crew to crew. Old rivalries, fresh nerves.',
                 '{player} climbs out for one last walk around the car.',
                 'Crew chief leans into {p2}\'s cockpit for a final word.',
                 'Toolboxes snapping shut up and down the lane.',
@@ -334,6 +334,59 @@
                 'Telemetry off {p3} shows ambient brake temps. Ready for the off.',
                 'Scanner reading {player}\'s pulse - rising, naturally. The wait does that.',
                 'Pre-race diagnostics show {p2} ran a quick rev test. Sounds clean.',
+                // Per spec v3.4: race-day atmosphere. Sensory details
+                // (smells, sounds, sights) that make the paddock feel
+                // alive without referencing in-race action. Wheel spins
+                // on the grid, tyre smoke from warm-ups, the smell of
+                // oil, photographers and press doing their rounds, food
+                // stands feeding the crowd.
+                'A quick wheel spin from {player} on the warm-up - tyre smoke drifting away.',
+                'Tyre smoke curls up from {p2}\'s grid box. Heat going into the rubber.',
+                'The smell of hot oil hangs over the grid this afternoon.',
+                'A waft of methanol fumes drifts across from the far side of the paddock.',
+                'Garage smells mingling - rubber, oil, fresh paint.',
+                'Frantic personnel movement as crews dart between cars one last time.',
+                'A team principal jogs over to the {player} pit, clipboard in hand.',
+                'Photographers crouch low at the front of the grid, jostling for the shot.',
+                'A press interview with {p3} cut short by the call to mount up.',
+                'Television crews swing their cameras across the grid.',
+                'Food stands behind the stands are doing brisk trade.',
+                'The unmistakable smell of fried onions drifting from the food trucks.',
+                'A vendor calls out his last burgers before the race starts.',
+                'A quick burnout from {p2} for the photographers. Showmanship.',
+                'Marshalls signal cars to settle - the wheel-spinning is over.',
+                'Tyre-warmer cables snake back to the trolleys, the rubber up to temperature.',
+                'A pre-race interview wraps up by the {player} pit.',
+                'Plumes of light smoke from idling engines drift across the grid.',
+                'The clatter of crew running with tool trolleys, last moves before the start.',
+                'A photographer almost gets in the way - a marshal shoos them clear.',
+                // Per spec v3.4: more varied driver-focused commentary.
+                // Mention car setup, wins-on-track (when known), how they
+                // might handle the race, what they could be thinking, how
+                // well the car might do, reaction to the track and racer
+                // count. The {raceRecord} token (already used elsewhere)
+                // resolves to wins-on-track flavour from the enlisted-cars
+                // API when available.
+                '{player} runs through the racing line in their head one more time.',
+                '{player} eyes the field - {total} other cars to deal with today.',
+                '{p2} looks across the grid, sizing up the competition.',
+                '{player} taps the dashboard, settling their thoughts.',
+                'The {car} set-up looks dialled in for {track} today.',
+                '{player} carrying {raceRecord} into this one. Form and customisation matters.',
+                '{p2} has done their homework on {track}. It shows in their posture.',
+                '{player} could spring a surprise here if the start goes right.',
+                'Question marks over how {p3} will handle the volume of cars today.',
+                '{player} knows {track} well - they will not be caught napping.',
+                '{p2} looks calm. A driver who has been here before.',
+                '{player} runs through their gear shifts on the steering wheel.',
+                'You can see {player} mentally rehearsing the first corner.',
+                '{p3} bobs their head to music only they can hear.',
+                'Plenty for {player} to think about with this many cars on track.',
+                '{p2} reaches forward, double-checking the dash readouts.',
+                '{player} looks every inch the racer in that {car}.',
+                'A confident look on {p3}\'s face - they fancy their chances.',
+                '{player} blinks slowly. Composure. The race starts in the head.',
+                'A reassuring nod from {p2}\'s engineer. Setup confirmed.',
                 '{p2} starts fighting {p3}.',
                 '{player} starts fighting {p2}.',
                 '{player} honks their horn in frustration.',
@@ -383,7 +436,7 @@
                 'Across the paddock, the call goes out: {timeLeft} to go.',
                 '{timeLeft} until pre-launch. The grid grows quieter.',
                 'Word from race control - {timeLeft} until the off.',
-                '{timeLeft} to go. Final preparations in the pit lane.',
+                '{timeLeft} to go. Final preparations under way.',
                 'Tannoy crackles to life - {timeLeft} until pre-launch.',
                 '{timeLeft} on the timer. Nerves jangling for some.',
                 'Just {timeLeft} now until we are racing on {track}.',
@@ -413,7 +466,7 @@
                 'Pre-launch underway. The last spanners come off the cars.',
                 'Pre-launch is on us. Crews wheeling tool boxes off the grid.',
                 'Pre-launch confirmed. Helmets buckled, visors snapping down.',
-                'Pre-launch begins. The pit lane empties of all but officials.',
+                'Pre-launch begins. The grid area empties of all but officials.',
                 'Pre-launch underway. Drivers double-checking belts and brakes.',
                 'We are in pre-launch. The final radio checks crackle through.',
                 'Pre-launch declared. Mechanics retreat behind the wall.',
@@ -421,7 +474,7 @@
                 'Pre-launch begins. Engines settle to their idle note.',
                 'And here we go - pre-launch. Last looks down the track from every cockpit.',
                 'Pre-launch confirmed. Marshals taking up their final positions.',
-                'Pre-launch underway. The pit boards come out one last time.',
+                'Pre-launch underway. The boards come out one last time.',
                 'We are into pre-launch. Crews pat their drivers on the helmet.',
                 'Pre-launch begins. The PA goes silent. The wait is short now.',
                 'Pre-launch underway. Every driver checks their mirrors.'
@@ -493,7 +546,19 @@
                 'Expect head-to-head jousting today - six drivers, no slow ones to lap.',
                 'No backmarkers in this race. Every overtake is for real points.',
                 'Officials have done their job - this field is brutally well matched.',
-                'A balanced field always means more contact. Watch for elbows out today.'
+                'A balanced field always means more contact. Watch for elbows out today.',
+                // Per spec v3.4: official-race driver-focused commentary
+                // mentioning points hopes and championship implications.
+                '{player} hoping to add some points to their championship tally today.',
+                '{p2} eyeing those three points for the win. Worth fighting for.',
+                'Even one point would be a useful pick-up for {player} this season.',
+                '{p3} knows top three pays. They will be racing for the podium.',
+                '{player} could really do with a points finish here.',
+                'A points day for {p2} would shake up the standings.',
+                '{player} runs the points maths in their head - 3, 2, 1, then nothing.',
+                'The pressure of points racing weighs on {p3}\'s shoulders today.',
+                '{player} has hands tight on the wheel. Points matter today.',
+                'Six drivers, three sets of points - {p2} wants their share.'
             ]
         },
         RACING: {
@@ -2119,6 +2184,10 @@
             state.prevRacers = p.racers || [];
             state.finishers = p.finishers || [];
             state.outroShown = p.outroShown || false;
+            // Per spec v3.4 BUG FIX: restore the official-race flag so
+            // it survives the inter-screen refresh between sign-up and
+            // race start.
+            state.officialRacePending = p.officialRacePending || false;
             state.lastLap = p.lastLap || '-';
             state.currentLap = p.currentLap || '-';
             state.prevLapNumber = p.prevLapNumber || 0;
@@ -2185,6 +2254,13 @@
                 racers: state.racers,
                 finishers: state.finishers,
                 outroShown: state.outroShown,
+                // Per spec v3.4 BUG FIX: officialRacePending must persist
+                // across page refreshes. The Torn racing page reloads
+                // between OFFICIAL_SIGNUP and the actual race (sign-up →
+                // car selection → countdown), and without persistence the
+                // flag was being lost, which is why the v3.2 points-line
+                // never fired on the user's 2nd-place official finish.
+                officialRacePending: state.officialRacePending,
                 lastLap: state.lastLap,
                 currentLap: state.currentLap,
                 prevLapNumber: state.prevLapNumber,
@@ -3145,16 +3221,22 @@
             // leaderboard but shouldn't keep position-change commentary alive
             // when the active field has dropped below 2.
             //
-            // Per spec v3.2 BUG FIX: also suppress position2/position3 lines
-            // once ANY racer has finished. These pools talk about "the
-            // leader" applying pressure on p2/p3, which presupposes the
-            // top of the field is still being actively contested. When
-            // positions 1 and 2 have crossed the line, the remaining
-            // racer is the LAST in actual race order, not the leader -
-            // firing leader-themed lines then is just wrong. Proximity,
-            // funny, and lonely-finish pools take over instead.
+            // Per spec v3.2 BUG FIX (refined in v3.4): suppress position2/
+            // position3 lines once ANY racer has finished. These pools talk
+            // about "the leader" applying pressure on p2/p3, which presupposes
+            // the top of the field is still being actively contested. When
+            // positions 1 and 2 have crossed the line, the remaining racer
+            // is the LAST in actual race order, not the leader.
+            //
+            // v3.4 bug: my v3.2 fix gated on state.finishers (player-only -
+            // populated when the player crosses). Other-racer finishers
+            // populate knownFinishers (via detectOtherFinishers) but not
+            // state.finishers, so the gate stayed open after non-player
+            // finishers, and the position2/position3 pool still fired with
+            // wrong "leader" tokens. Switching to knownFinishers.size
+            // catches every finisher, player or other.
             const activeCount = getActiveRacers().length;
-            const noFinishers = (state.finishers || []).length === 0;
+            const noFinishers = (!knownFinishers || knownFinishers.size === 0);
             if (now >= tPosition && now >= tPosCooldown && activeCount >= 2 && !lonely && noFinishers) {
                 if (bigRaceShouldShow()) {
                     if (isThreePlusRace()) {
@@ -5361,7 +5443,17 @@
         };
         const m = map[state.status] || { label: state.status, cls: 'st-menu' };
         el.textContent = m.label;
-        el.className = m.cls;
+        // Per spec v3.4: when an official race is active (the player came
+        // from OFFICIAL_SIGNUP and hasn't finished yet), tint the STATUS
+        // text the same shade as the standard grey but with a green hue.
+        // We append the st-officialActive marker class so the visible
+        // status text (RACING/COUNTDOWN/PRE-LAUNCH/etc.) renders green
+        // without disturbing the base colour class.
+        let cls = m.cls;
+        if (state.officialRacePending && state.status !== S.OFFICIAL_SIGNUP) {
+            cls = cls + ' st-officialActive';
+        }
+        el.className = cls;
     }
 
     function renderLeaderboard () {
@@ -5621,6 +5713,11 @@
 .tc-st-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c-dim);letter-spacing:.14em;flex-shrink:0;}
 #tc-rc-status-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;letter-spacing:.05em;}
 .st-menu{color:var(--c-gold);}.st-countdown{color:var(--c-blue);}.st-prelaunch{color:var(--c-orange);}.st-waiting{color:var(--c-orange);}.st-racing{color:var(--c-green);}.st-replay{color:var(--c-purple);}.st-ended{color:var(--c-purple);}.st-crashed{color:var(--c-red);}.st-unavailable{color:var(--c-orange);}.st-hospital{color:var(--c-red);}.st-jail{color:var(--c-red);}.st-timedout{color:var(--c-orange);}.st-toolate{color:var(--c-orange);}.st-racefull{color:var(--c-orange);}.st-nofunds{color:var(--c-orange);}.st-notallowed{color:var(--c-red);}.st-torndown{color:var(--c-red);font-size:11px;letter-spacing:.06em;}.st-garage{color:var(--c-blue);}.st-stats{color:var(--c-blue);}.st-enlisted{color:var(--c-blue);}
+/* Per spec v3.4: official-race active status tint. Same brightness as
+   the standard mid-grey reference but shifted to a green hue. !important
+   overrides whatever base status colour class is also applied. */
+.st-officialActive{color:#7aa67a !important;}
+.st-official{color:#7aa67a;}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
 #tc-rc-cols{position:relative;flex:1;overflow:hidden;min-height:0;display:block;}
