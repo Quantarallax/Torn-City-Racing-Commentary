@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.4.0
+// @version      3.4.1
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.4.0';
+    const SCRIPT_VERSION = '3.4.1';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -234,6 +234,33 @@
     // minutes (MECH_ADVERT_COOLDOWN_MS) via the mechAdvert type-key in
     // pickLine, which uses the 20-line REPEAT_WINDOW_LONG so different
     // templates pair with different shops over a long session.
+    // Per spec v3.4.1: Torn City crimes list used by the {crime} token in
+    // police-scanner lines. Sourced from Crimes 2.0 and Organized Crime
+    // 2.0 references. Phrased in lowercase noun form so they slot into
+    // sentences like "dealing with a {crime}" naturally.
+    const TC_CRIMES = [
+        'stagecoach robbery',
+        'counterfeiting bust',
+        'pickpocketing ring',
+        'bank robbery',
+        'burglary in progress',
+        'hustling operation',
+        'forgery investigation',
+        'cash-search sweep',
+        'vandalism spree',
+        'arson incident',
+        'theft from a vehicle',
+        'shoplifting case',
+        'card-skimming operation',
+        'jewellery store heist',
+        'illegal weapons run',
+        'casino-job tip-off',
+        'truck-jacking call',
+        'protection-racket complaint',
+        'graffiti spree',
+        'big-con sting'
+    ];
+
     const MECH_SHOP_DUMMIES = [
         { name: 'Big Al\'s Tune-Up Garage', stars: 10, owner: 'BigAl' },
         { name: 'Spark Plug Sammy\'s', stars: 8, owner: 'Sammy' },
@@ -521,6 +548,18 @@
         // Tone is upbeat and "event day" - different from the gritty
         // street-race feel that police/illegal pools bring.
         OFFICIAL: {
+            // Per spec v3.4.1: lines that reference officials in crisp
+            // uniforms, podium ceremony, brass bands and other glitter-
+            // and-glamour cues only fit a Speedway race. Move those three
+            // into a dedicated Speedway-only sub-pool, merged separately
+            // in ambientPoolFor. The street-race official events on
+            // illegal tracks (which CAN still be flagged as "official"
+            // via the sign-up flow) should stay gritty.
+            ambientSpeedwayOnly: [
+                'Local musicians warming up the crowd. Officials in full ceremony mode.',
+                'Race officials in their crisp uniforms today. Proper occasion.',
+                'Confetti cannons primed near the podium. Someone is going to need them.'
+            ],
             ambient: [
                 'Reminder for the home viewers - three points for the win, two for second, one for third. Nothing below that.',
                 'An official points race today. Six class-A drivers, all on the same level.',
@@ -528,12 +567,9 @@
                 'Six matched drivers, three sets of points. This will get fierce.',
                 'Heads up - this is an official points-paying race. Every position matters in the top three.',
                 'A brass band strikes up near the main stand. Race day proper, this.',
-                'Local musicians warming up the crowd. Officials in full ceremony mode.',
                 'Bunting, banners, the official championship sponsors out in force.',
-                'Race officials in their crisp uniforms today. Proper occasion.',
                 'A celebrity grid walker doing the rounds. Big day for {track}.',
                 'The crowd in their proper Sunday best - or whatever the local equivalent is.',
-                'Confetti cannons primed near the podium. Someone is going to need them.',
                 'Pickpockets working the busy crowd at the far stand. As ever.',
                 'Police chasing a tagger - someone has graffitied the back of the press box.',
                 'Smoke rises from a small fire near the south gate. Arson, says race control.',
@@ -684,7 +720,13 @@
                 'Police scanner crackles - they are on their way to a counterfeiting bust.',
                 'Most of the police force is on their lunch break. Lucky us.',
                 'Police scanner picks up a burglary in progress on the other side of Torn. Not our problem.',
-                'They are dealing with a stagecoach robbery. Eyes off us for now.',
+                'The cops are dealing with a {crime} at the moment.',
+                // Per spec v3.4.1: three more crime-aware variants. All
+                // use the {crime} token so the police-elsewhere flavour
+                // stays fresh across long sessions.
+                'Word over the scanner - a {crime} just landed in their lap. Lucky us.',
+                'Police all tied up with a {crime}. Their night just got busy.',
+                'Scanner squawks - a {crime} is pulling every spare car. Not our problem.',
                 'Police are keeping crowd control - we suspect they enjoy the racing too.',
                 'A police helicopter hovers overhead. The pilot waves at the leading car.',
                 'Sirens in the distance - not for us, thankfully.',
@@ -1817,6 +1859,16 @@
             tags.industrial = true;
         }
         if (/\bdock|\bharbour|\bharbor|\bport\b|\bquay/.test(desc)) tags.docks = true;
+        // Per spec v3.4.1 BUG FIX: Vector is the urban downtown track in
+        // Torn. Its API description happens to contain wording that hits
+        // the docks regex above (e.g. "port-side", "transport"), causing
+        // dock-crane lines to fire wrongly. Hard-suppress the docks tag
+        // for Vector and force the urban/city tag instead so flavour
+        // lines reflect the actual track environment.
+        if (state.track === 'Vector') {
+            tags.docks = false;
+            tags.city = true;
+        }
         if (/\bforest\b|\btree\b|\bwood\b|\bscenic\b/.test(desc)) tags.forest = true;
         if (/\bcity\b|\burban\b|\bstreet\b|\bdistrict\b/.test(desc)) tags.city = true;
         if (/\bcountry\b|\brural\b|\bfarm\b|\bfield\b|\bpark\b/.test(desc)) tags.country = true;
@@ -2447,6 +2499,13 @@
             if (state.officialRacePending
                 && LINES.OFFICIAL && Array.isArray(LINES.OFFICIAL.ambient)) {
                 out = out.concat(LINES.OFFICIAL.ambient);
+                // Per spec v3.4.1: glitter/officials/podium ceremony
+                // lines only fit a Speedway-track official race. Merge
+                // the Speedway-only sub-pool when both conditions hold.
+                if (state.track === 'Speedway'
+                    && Array.isArray(LINES.OFFICIAL.ambientSpeedwayOnly)) {
+                    out = out.concat(LINES.OFFICIAL.ambientSpeedwayOnly);
+                }
             }
             return out;
         }
@@ -2460,6 +2519,12 @@
             && state.officialRacePending
             && LINES.OFFICIAL && Array.isArray(LINES.OFFICIAL.ambient)) {
             out = out.concat(LINES.OFFICIAL.ambient);
+            // Per spec v3.4.1: glitter/podium/uniformed-officials lines
+            // require Speedway as well as official-race-pending.
+            if (state.track === 'Speedway'
+                && Array.isArray(LINES.OFFICIAL.ambientSpeedwayOnly)) {
+                out = out.concat(LINES.OFFICIAL.ambientSpeedwayOnly);
+            }
         }
         // Per spec v2.92: merge the police pool into RACING ambient when
         // the current track is illegal. This adds Torn-themed flavour
@@ -2571,6 +2636,11 @@
             startSignal: isIllegalTrack(state.track)
                 ? 'flag is about to drop'
                 : 'lights are about to come on',
+            // Per spec v3.4.1: {crime} token resolves to a random Torn
+            // City crime so police-scanner lines can vary across both
+            // crime type and template phrasing. List drawn from Crimes
+            // 2.0 and Organized Crime 2.0 references.
+            crime: TC_CRIMES[Math.floor(Math.random() * TC_CRIMES.length)],
             countdown: scrapeCountdown() || 'a few moments',
             // {trackDesc} comes from the Torn v2 API /racing/tracks endpoint
             // matched by title. Empty string if no API key set or not yet
@@ -3079,8 +3149,26 @@
             // we haven't fired that milestone yet this race. The check
             // runs ahead of the normal ambient dispatch so milestones
             // always land on time and aren't blocked by the ambient gap.
+            //
+            // Per spec v3.4.1 BUG FIX: when the player JOINS a race
+            // mid-countdown (e.g. with 2 minutes left), the 45/30/15-
+            // minute milestones are already in the past. The previous
+            // logic would still fire them one-by-one on subsequent
+            // polls because none had been marked as "fired" yet. Fix:
+            // on the first poll where firedMilestones is empty, mark
+            // every milestone STRICTLY ABOVE the current time as
+            // already-fired so only milestones we genuinely cross in
+            // real time will trigger lines. Uses a sentinel key so the
+            // back-fill happens only once per race entry.
             const secsLeft = scrapeCountdownSeconds();
             if (secsLeft !== null && secsLeft > 0) {
+                if (!firedMilestones.__seeded) {
+                    for (let i = 0; i < COUNTDOWN_MILESTONES.length; i++) {
+                        const ms = COUNTDOWN_MILESTONES[i];
+                        if (secsLeft < ms.sec) firedMilestones[ms.sec] = true;
+                    }
+                    firedMilestones.__seeded = true;
+                }
                 for (let i = 0; i < COUNTDOWN_MILESTONES.length; i++) {
                     const ms = COUNTDOWN_MILESTONES[i];
                     if (secsLeft <= ms.sec && !firedMilestones[ms.sec]) {
@@ -4342,7 +4430,7 @@
         '{player} scores {points} racing points for that effort.',
         'Officials credit {player} with {points} racing points.',
         '{points} points for {player}. Another step up the rankings.',
-        'And {player} adds {points} racing points to their season tally.'
+        'And {player} adds {points} racing points to their racer catalogue.'
     ];
 
     // Resolve points awarded for a given finishing position. Per spec
@@ -4398,12 +4486,18 @@
                 const pts = officialPointsForPosition(playerFinish.pos);
                 if (pts > 0) {
                     const tpl = pickLine(OFFICIAL_POINTS_LINES, 'officialFlavour');
-                    pushLine(
-                        tpl.replace(/\{player\}/g, pname)
-                           .replace(/\{points\}/g, String(pts))
-                           .replace(/\{pos\}/g, ordinal(playerFinish.pos)),
-                        'finish'
-                    );
+                    let filled = tpl.replace(/\{player\}/g, pname)
+                                    .replace(/\{points\}/g, String(pts))
+                                    .replace(/\{pos\}/g, ordinal(playerFinish.pos));
+                    // Per spec v3.4.1 BUG FIX: when only 1 point is
+                    // awarded (3rd place), all "points" mentions must be
+                    // singular. The OFFICIAL_POINTS_LINES templates only
+                    // reference the {points}-count "points" word, so a
+                    // blanket singularise is safe here.
+                    if (pts === 1) {
+                        filled = filled.replace(/\bpoints\b/g, 'point');
+                    }
+                    pushLine(filled, 'finish');
                 }
                 // Consume the flag whether or not points were awarded -
                 // the next race shouldn't inherit official-race wording.
