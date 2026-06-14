@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.5.2
+// @version      3.5.3
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.5.1';
+    const SCRIPT_VERSION = '3.5.3';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -141,14 +141,7 @@
         wait: '<span class="tc-icon"><svg width="13" height="13" viewBox="0 0 13 13" fill="none">'
             + '<circle cx="6.5" cy="6.5" r="6" stroke="#ffaa50" stroke-width="1.2"/>'
             + '<line x1="6.5" y1="3" x2="6.5" y2="7" stroke="#ffaa50" stroke-width="1.5"/>'
-            + '<circle cx="6.5" cy="9.5" r="1" fill="#ffaa50"/></svg></span>',
-        // Per spec v3.5: medium-grey clock icon for countdown-timer
-        // milestone messages (45/30/15/5/1/30s). Visually distinct from
-        // the orange "wait" icon used for status/throttle hints.
-        milestone: '<span class="tc-icon"><svg width="13" height="13" viewBox="0 0 13 13" fill="none">'
-            + '<circle cx="6.5" cy="6.5" r="6" stroke="#aaaaaa" stroke-width="1.2"/>'
-            + '<line x1="6.5" y1="3" x2="6.5" y2="6.5" stroke="#aaaaaa" stroke-width="1.5"/>'
-            + '<line x1="6.5" y1="6.5" x2="9" y2="7.5" stroke="#aaaaaa" stroke-width="1.5"/></svg></span>'
+            + '<circle cx="6.5" cy="9.5" r="1" fill="#ffaa50"/></svg></span>'
     };
 
     const TROPHY = {
@@ -455,38 +448,6 @@
             // thresholds (45min/30min/15min/5min/1min/30sec). 20 templates,
             // each using {timeLeft} which gets filled per milestone. Each
             // milestone fires at most once per race (firedMilestones map).
-            // Per spec v3.5: radio-comms sub-pool. Pickups from a paddock
-            // scanner of racer-to-crew and crew-to-racer messages -
-            // distinct from the police scanner. No specific words are
-            // quoted (we don't know what they actually said) - instead
-            // we describe the FEELING/TONE of the exchange, which lands
-            // more authentic. Urgency escalates as pre-launch nears, so
-            // these lines vary from "easy banter" (early countdown) up
-            // to "barked instructions" (final minutes). The dispatcher
-            // doesn't gate by urgency yet - all 20 are in one pool and
-            // are framed naturally by the surrounding ambient lines.
-            radioComms: [
-                'Scanner picks up casual banter between {player} and the crew. All easy.',
-                'Crew chatter to {p2} - the tone is relaxed. Plenty of time still.',
-                'A pickup from the paddock scanner - {p3}\'s engineer sounds upbeat.',
-                'Crackle on the scanner - {player}\'s crew confirming something procedural.',
-                'Easy back-and-forth between {p2} and their crew, the tone friendly.',
-                'A few jokes coming over the {player} pit channel. Settling the nerves.',
-                'Crew on the line to {p3} - sounds like a final-check rundown.',
-                'Quick exchange between {player} and the wall. Tone is professional.',
-                'Scanner catches the {p2} crew running through their checklist out loud.',
-                'A confidence-boost from the {player} engineer comes over the scanner.',
-                '{p3}\'s pit comms picked up - voices a little tighter now. Focus.',
-                'Crew to {player} - brisker now. Nerves starting to show in the cadence.',
-                '{p2} on the radio. Their voice has dropped a register. Getting serious.',
-                'Scanner crackles - {player}\'s engineer reading numbers fast. Final prep.',
-                'Curt exchange between {p3} and the crew. No wasted words now.',
-                'Voices tighter on the {player} channel. The clock is doing its work.',
-                'A bark of instruction from the {p2} pit wall - urgency creeping in.',
-                'Final calls between {player} and the crew. Tone is all business.',
-                'Crew comms to {p3} now clipped. Almost time.',
-                'Last words between {player} and the wall before they go quiet for the launch.'
-            ],
             timerMilestones: [
                 '{timeLeft} until pre-launch. Hold tight.',
                 'Mark it - {timeLeft} until we go racing.',
@@ -532,7 +493,7 @@
                 'Pre-launch underway. The last spanners come off the cars.',
                 'Pre-launch is on us. Crews wheeling tool boxes off the grid.',
                 'Pre-launch confirmed. Helmets buckled, visors snapping down.',
-                'Pre-launch begins. The grid area empties of all but the crew.',
+                'Pre-launch begins. The grid area empties of all but officials.',
                 'Pre-launch underway. Drivers double-checking belts and brakes.',
                 'We are in pre-launch. The final radio checks crackle through.',
                 'Pre-launch declared. Mechanics retreat behind the wall.',
@@ -617,7 +578,7 @@
                 'Fresh graffiti gets sprayed onto the perimeter wall during the chaos. Charming.',
                 'Police break up a fight over a wallet near the betting kiosks.',
                 'Someone tried setting fire to a portable loo. Marshalls have it under control.',
-                'There\'s been reports of active pickpockets at the event today.',
+                'Whispered word of more cash-searchers working the crowd. Eyes peeled.',
                 'Expect head-to-head jousting today - six drivers, no slow ones to lap.',
                 'No backmarkers in this race. Every overtake is for real points.',
                 'Officials have done their job - this field is brutally well matched.',
@@ -1627,4 +1588,70 @@
                     }
                 },
                 onerror: function () { carsFetchInFlight = false; },
-                ontimeout: function () 
+                ontimeout: function () { carsFetchInFlight = false; }
+            });
+        } catch (e) {
+            carsFetchInFlight = false;
+        }
+    }
+
+    // Find the enlisted-car record matching the player's currently selected
+    // car. Per spec v2.78: "If more than one car matches player's current
+    // car, pick a random entry out of the ones founds of the same car
+    // name." We resolve by car_item_name (the API name), comparing case-
+    // insensitively against the scraped state.car. Returns null when no
+    // cached cars data is available (no minimal key, or fetch failed).
+    function getPlayerCarData () {
+        if (!carsCache) carsCache = loadCarsCache();
+        if (!carsCache || !carsCache.cars) {
+            fetchEnlistedCars();
+            return null;
+        }
+        const cur = (state.car || '').trim().toLowerCase();
+        if (!cur || cur === '-') return null;
+        const matches = [];
+        for (let i = 0; i < carsCache.cars.length; i++) {
+            const c = carsCache.cars[i];
+            const nm = (c.car_item_name || '').trim().toLowerCase();
+            if (nm === cur) matches.push(c);
+        }
+        if (!matches.length) return null;
+        return matches[Math.floor(Math.random() * matches.length)];
+    }
+
+    // Player car class - used to drive both record-class lookup and the
+    // attribute classification scale. Returns 'A'..'E' or null. Falls back
+    // to 'A' if minimal-key data isn't available but we still want a
+    // reasonable default for record fetching (the records endpoint requires
+    // a class param to return anything useful).
+    function getPlayerCarClass () {
+        const data = getPlayerCarData();
+        if (data && typeof data.class === 'string') return data.class.toUpperCase();
+        // Best-effort fallback: class A. Public-key users won't have car
+        // data but should still see Class A records on Class A tracks.
+        return 'A';
+    }
+
+    // Per spec v2.78: attribute classification on a class-scaled sliding
+    // scale. Class A: 0-50 Low / 51-100 Medium / 101-150 High. Lower classes
+    // scale down such that 50 is "High" at Class E. Implemented as a single
+    // factor on the breakpoints.
+    //   A: factor 1.0  → breakpoints 50, 100   (max ~150)
+    //   B: factor 0.8  → breakpoints 40, 80    (max ~120)
+    //   C: factor 0.6  → breakpoints 30, 60    (max ~90)
+    //   D: factor 0.4  → breakpoints 20, 40    (max ~60)
+    //   E: factor 0.33 → breakpoints 17, 33    (max ~50)
+    function classifyAttr (value, carClass) {
+        if (typeof value !== 'number') return 'unknown';
+        const factor = { A: 1.0, B: 0.8, C: 0.6, D: 0.4, E: 0.33 }[carClass] || 1.0;
+        const lowMax = 50 * factor;
+        const mediumMax = 100 * factor;
+        if (value <= lowMax) return 'low';
+        if (value <= mediumMax) return 'medium';
+        return 'high';
+    }
+
+    // Return a structured snapshot of the player's car attributes with each
+    // one classified (low/medium/high). Used by the commentary engine to
+    // shape flavour lines that reference whether the car is strong/weak in
+    /
