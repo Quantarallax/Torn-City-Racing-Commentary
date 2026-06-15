@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.6.0
+// @version      3.7.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.6.0';
+    const SCRIPT_VERSION = '3.7.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4246,6 +4246,12 @@
                 // Per spec v3.6: reset the 100-racer field-full latch so
                 // the next race can fire its own one-shot when applicable.
                 state.fieldFullFired = false;
+                // Per spec v3.7: reset BEST tracking and the POS arrow
+                // baseline so each new race builds its own position
+                // history from scratch.
+                state.bestPosition = 0;
+                state.lastArrowPos = 0;
+                state.lastLapMsgFired = false;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
@@ -5543,6 +5549,22 @@
                         }
                     }
 
+                    // Per spec v3.7: fire the "last lap" commentary when we
+                    // cross into the final lap of a race that's more than
+                    // one lap long. One-shot per race via state.lastLapMsgFired
+                    // (reset on race entry alongside other per-race latches).
+                    // Fires as a status-type line so it's never throttled.
+                    if (state.totalLaps > 1
+                        && lapNumNow === state.totalLaps
+                        && !state.lastLapMsgFired
+                        && !commentaryPaused && !replayPausedAuto) {
+                        state.lastLapMsgFired = true;
+                        pushLine(
+                            "We're into the last lap! - will the sequence of racers change.",
+                            'status', ICON.flag
+                        );
+                    }
+
                     // Fire commentary from lap 2 onwards.
                     if (state.prevLapNumber >= 1 && !commentaryPaused && !replayPausedAuto) {
                         // Initialise the comparison cadence target on the first
@@ -5748,6 +5770,41 @@
         sv('tc-ib-car', displayCar);
         const posNum = parseInt(displayPos, 10);
         sv('tc-ib-pos', posNum >= 1 ? ordinal(posNum) : '-');
+        // Per spec v3.7: BEST cell shows the best (lowest-numbered)
+        // position reached in the current race. Tracking is racing-only
+        // and focus-aware: when focus is on the player, track the
+        // player's best; when focus is on another racer, just mirror
+        // their current position (we don't track other racers' bests).
+        if (!focusActive && isRacingLike(state.status) && posNum >= 1) {
+            if (!state.bestPosition || posNum < state.bestPosition) {
+                state.bestPosition = posNum;
+            }
+        }
+        const bestNum = focusActive ? posNum : state.bestPosition;
+        sv('tc-ib-best', bestNum >= 1 ? ordinal(bestNum) : '-');
+        // Per spec v3.7: POS arrow indicator. Default grey arrow points
+        // right (no change / pre-race). Green up-arrow when position
+        // improved (number decreased), red down-arrow when it worsened.
+        // Compare against state.lastRenderedPosition so multiple polls
+        // at the same position don't flash the arrow.
+        const arrow = document.getElementById('tc-ib-pos-arrow');
+        if (arrow) {
+            arrow.classList.remove('tc-pos-arrow-up', 'tc-pos-arrow-down', 'tc-pos-arrow-flat');
+            if (focusActive || !posNum || !isRacingLike(state.status)) {
+                arrow.classList.add('tc-pos-arrow-flat');
+                arrow.innerHTML = '&#x25B6;'; // ▶ right (neutral / default)
+            } else if (typeof state.lastArrowPos === 'number' && posNum < state.lastArrowPos) {
+                arrow.classList.add('tc-pos-arrow-up');
+                arrow.innerHTML = '&#x25B2;'; // ▲ up (gained)
+            } else if (typeof state.lastArrowPos === 'number' && posNum > state.lastArrowPos) {
+                arrow.classList.add('tc-pos-arrow-down');
+                arrow.innerHTML = '&#x25BC;'; // ▼ down (lost)
+            } else {
+                arrow.classList.add('tc-pos-arrow-flat');
+                arrow.innerHTML = '&#x25B6;'; // unchanged or first sample
+            }
+            if (!focusActive && posNum) state.lastArrowPos = posNum;
+        }
         // Visual cue: a subtle marker next to the driver label when focus is on another racer.
         const driverLabel = document.getElementById('tc-ib-name');
         if (driverLabel) {
@@ -6061,6 +6118,13 @@
 /* Per spec v3.6: medium-grey milestone commentary - countdown-timer
    marks at 45/30/15/5/1 minutes and 30 seconds. */
 .fl-milestone{color:#aaaaaa;}
+/* Per spec v3.7: POS arrow indicator. Default state is grey, pointing
+   right (no change). Green-up when the player gains a position, red-
+   down when they lose one. */
+.tc-pos-arrow{margin-left:4px;font-size:11px;display:inline-block;}
+.tc-pos-arrow-flat{color:#888888;}
+.tc-pos-arrow-up{color:#3fdd5f;}
+.tc-pos-arrow-down{color:#ff5a5a;}
 .st-official{color:#7aa67a;}
 .tc-fl a.tc-link{color:var(--c-blue);text-decoration:underline;}
 .tc-fl a.tc-link:hover{color:var(--c-gold);}
@@ -6176,7 +6240,9 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       <div class="tc-ib-sep"></div>
       <div class="tc-ib-cell"><div class="tc-ib-lbl">CAR</div><div class="tc-ib-val" id="tc-ib-car">&#8212;</div></div>
       <div class="tc-ib-sep"></div>
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">POS</div><div class="tc-ib-val" id="tc-ib-pos">&#8212;</div></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">POS</div><div class="tc-ib-val"><span id="tc-ib-pos">&#8212;</span><span class="tc-pos-arrow tc-pos-arrow-flat" id="tc-ib-pos-arrow">&#x25B6;</span></div></div>
+      <div class="tc-ib-sep"></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl">BEST</div><div class="tc-ib-val" id="tc-ib-best">&#8212;</div></div>
     </div>
     <div id="tc-rc-status-row">
       <span class="tc-st-lbl">STATUS</span>
