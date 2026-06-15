@@ -1278,9 +1278,9 @@
         { sec: 45 * 60, label: 'Forty-five minutes' },
         { sec: 30 * 60, label: 'Just over half an hour' },
         { sec: 15 * 60, label: 'Fifteen minutes' },
-        { sec: 5 * 60,  label: 'Five minutes' },
-        { sec: 60,      label: 'One minute' },
-        { sec: 30,      label: 'Thirty seconds' }
+        { sec: 5 * 60, label: 'Five minutes' },
+        { sec: 60, label: 'One minute' },
+        { sec: 30, label: 'Thirty seconds' }
     ];
     let firedMilestones = {};
 
@@ -2754,28 +2754,28 @@
             trackFlavour: (function () {
                 const tags = getTrackCharacteristics();
                 const phrases = [];
-                if (tags.slalom)         phrases.push('through the slalom');
-                if (tags.hairpins)       phrases.push('through the hairpins');
-                if (tags.rightAngles)    phrases.push('into the 90-degree bends');
-                if (tags.sharpCorners)   phrases.push('into the razor-sharp corners');
-                if (tags.softBends)      phrases.push('through the gentle bends');
-                if (tags.straights)      phrases.push('down the long straight');
-                if (tags.bridges)        phrases.push('across the bridges');
-                if (tags.lake)           phrases.push('round the lake');
-                if (tags.islands)        phrases.push('round the island');
-                if (tags.powerPlant)     phrases.push('past the cooling towers');
+                if (tags.slalom) phrases.push('through the slalom');
+                if (tags.hairpins) phrases.push('through the hairpins');
+                if (tags.rightAngles) phrases.push('into the 90-degree bends');
+                if (tags.sharpCorners) phrases.push('into the razor-sharp corners');
+                if (tags.softBends) phrases.push('through the gentle bends');
+                if (tags.straights) phrases.push('down the long straight');
+                if (tags.bridges) phrases.push('across the bridges');
+                if (tags.lake) phrases.push('round the lake');
+                if (tags.islands) phrases.push('round the island');
+                if (tags.powerPlant) phrases.push('past the cooling towers');
                 if (tags.waterTreatment) phrases.push('past the treatment plant');
-                if (tags.jail)           phrases.push('past the jail');
-                if (tags.financial)     phrases.push('through the financial district');
-                if (tags.shopping)       phrases.push('through the shopping district');
-                if (tags.docks)          phrases.push('round the dock cranes');
-                if (tags.industrial)     phrases.push('between the factory walls');
-                if (tags.water)          phrases.push('along the waterfront');
-                if (tags.country)        phrases.push('through the park');
-                if (tags.upmarket)       phrases.push('through the rich district');
-                if (tags.mud)            phrases.push('through the dirt section');
-                if (tags.oval)           phrases.push('round the banking');
-                if (tags.hilly)          phrases.push('over the rise');
+                if (tags.jail) phrases.push('past the jail');
+                if (tags.financial) phrases.push('through the financial district');
+                if (tags.shopping) phrases.push('through the shopping district');
+                if (tags.docks) phrases.push('round the dock cranes');
+                if (tags.industrial) phrases.push('between the factory walls');
+                if (tags.water) phrases.push('along the waterfront');
+                if (tags.country) phrases.push('through the park');
+                if (tags.upmarket) phrases.push('through the rich district');
+                if (tags.mud) phrases.push('through the dirt section');
+                if (tags.oval) phrases.push('round the banking');
+                if (tags.hilly) phrases.push('over the rise');
                 if (!phrases.length) phrases.push('through the field');
                 return phrases[Math.floor(Math.random() * phrases.length)];
             })(),
