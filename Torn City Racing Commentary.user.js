@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.3
+// @version      3.8.4
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.3';
+    const SCRIPT_VERSION = '3.8.4';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -480,11 +480,25 @@
             // Templates use the same {token} convention as the rest of
             // the pool - {track}, {raceCountTotal}, {customRaceCount},
             // {officialRaceCount}, {completedRaceCount}.
+            // Per v3.8.4: expanded from 4 to 10 templates and the pool
+            // is now duplicated 2x when merged into ambient, lifting
+            // per-pick probability from ~3% to ~13% so race-schedule
+            // mentions become a regular feature of COUNTDOWN rather
+            // than a once-in-80-minutes rarity. Templates phrased to
+            // read naturally even when individual counts are zero
+            // (raceCountsAvailable gates on ANY non-zero - completed
+            // could be zero with in-progress non-zero, or vice versa).
             raceSchedule: [
                 "Can you believe there's {raceCountTotal} races scheduled for today on {track}.",
                 "Full schedule today on {track}, the rosta shows {customRaceCount} custom races in progress.",
                 "{track} isn't getting much use today, only {raceCountTotal} scheduled - {customRaceCount} custom, {officialRaceCount} official.",
-                "{track} has been busy today, {completedRaceCount} have been run so far."
+                "{track} has been busy today, {completedRaceCount} have been run so far.",
+                "Day's rota for {track} - {customRaceCount} custom, {officialRaceCount} official, {completedRaceCount} already done.",
+                "Word from race control - {officialRaceCount} official races on the {track} schedule today. Points up for grabs.",
+                "{customRaceCount} custom races on the board for {track} today. Plenty of action either side of this one.",
+                "Scoreboard reckoning - {completedRaceCount} races already in the books on {track} today.",
+                "Quiet day on {track}, only {raceCountTotal} races still to come. Worth catching every one.",
+                "{track} schedule busy as ever - {customRaceCount} custom and {officialRaceCount} official races to look forward to."
             ],
             radioComms: [
                 'Scanner picks up casual banter between {player} and the crew. All easy.',
@@ -2682,10 +2696,18 @@
             // the templates render with empty-string tokens which
             // produces nonsense like "Full schedule today on Industrial,
             // the rosta shows  custom races in progress."
+            // Per spec v3.8.4: pool is concatenated TWICE to lift
+            // per-pick probability (10 templates duplicated = 20 slots
+            // in a ~150-line pool, so ~13% per pick rather than ~3%).
+            // The repeat-window guard still prevents the SAME line
+            // from firing twice in 10 ambient picks, so duplication
+            // increases the category's share without producing
+            // back-to-back identical text.
             if (statusLines === LINES.COUNTDOWN
                 && Array.isArray(LINES.COUNTDOWN.raceSchedule)
                 && raceCountsAvailable()) {
-                out = out.concat(LINES.COUNTDOWN.raceSchedule);
+                out = out.concat(LINES.COUNTDOWN.raceSchedule,
+                                 LINES.COUNTDOWN.raceSchedule);
             }
             // Per spec v3.3: official-race extras merge into COUNTDOWN
             // and PRE_LAUNCH ambient when officialRacePending is set.
