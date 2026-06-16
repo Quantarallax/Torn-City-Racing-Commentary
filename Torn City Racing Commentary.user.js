@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.1
+// @version      3.8.3
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.1';
+    const SCRIPT_VERSION = '3.8.3';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -412,7 +412,7 @@
                 // resolves to wins-on-track flavour from the enlisted-cars
                 // API when available.
                 '{player} runs through the racing line in their head one more time.',
-                '{player} eyes the field - {total} other cars to deal with today.',
+                '{player} eyes the field - {othersPhrase} to deal with today.',
                 '{p2} looks across the grid, sizing up the competition.',
                 '{player} taps the dashboard, settling their thoughts.',
                 'The {car} set-up looks dialled in for {track} today.',
@@ -512,7 +512,7 @@
                 '{timeLeft} until pre-launch. Hold tight.',
                 'Mark it - {timeLeft} until we go racing.',
                 'Official confirmation: {timeLeft} until the racers are released.',
-                'Just {timeLeft} to go before the lights come up.',
+                'Only {timeLeft} to go before the lights come up.',
                 '{timeLeft} on the clock. Anticipation builds.',
                 'And we are now {timeLeft} from pre-launch.',
                 '{timeLeft} until the action starts. Get comfortable.',
@@ -526,7 +526,7 @@
                 '{timeLeft} to go. Final preparations under way.',
                 'Tannoy crackles to life - {timeLeft} until pre-launch.',
                 '{timeLeft} on the timer. Nerves jangling for some.',
-                'Just {timeLeft} now until we are racing on {track}.',
+                'Only {timeLeft} now until we are racing on {track}.',
                 '{timeLeft} to go before pre-launch. Engines stirring.',
                 'And the call: {timeLeft} remaining until the race begins.'
             ],
@@ -2824,6 +2824,20 @@
                 return Math.random() < 0.5 ? 'at the back' : 'in last position';
             })(),
             total: String(state.racerCount || state.racers.length || '?'),
+            // Per spec v3.8.2 BUG FIX: {othersPhrase} expands to a
+            // grammatically-correct count of OTHER racers (total - 1)
+            // for use in "X eyes the field - Y to deal with today" style
+            // lines. Singular for 1 other car ("one other car"), plural
+            // for the rest ("3 other cars"). When the FULL field is five
+            // racers or fewer, prefixes "only " to underline the small
+            // field. Falls back to '' when the count isn't known yet.
+            othersPhrase: (function () {
+                const tot = state.racerCount || state.racers.length || 0;
+                if (tot < 2) return '';
+                const others = tot - 1;
+                const word = (others === 1) ? 'one other car' : (others + ' other cars');
+                return (tot <= 5 ? 'only ' : '') + word;
+            })(),
             // Per spec v3.8.0: race-count tokens populated from the
             // /v2/racing/races cache. Returns '' (empty string) when
             // no data is available - the radio-chatter callers gate
@@ -3465,7 +3479,19 @@
                 }
                 for (let i = 0; i < COUNTDOWN_MILESTONES.length; i++) {
                     const ms = COUNTDOWN_MILESTONES[i];
-                    if (secsLeft <= ms.sec && !firedMilestones[ms.sec]) {
+                    // Per spec v3.8.3 BUG FIX: belt-and-braces real-time
+                    // crossing check. Even if the seeding above somehow
+                    // didn't catch a mid-countdown join (e.g. when state
+                    // is restored from persistence and clearedForStatus
+                    // already matches, so onStatusChange never resets
+                    // firedMilestones), only fire a milestone if secsLeft
+                    // is within a 60-second window AT or just below the
+                    // threshold. Polls run every ~1-2s, so 60s is plenty
+                    // of room to catch the crossing, but blocks any
+                    // milestone whose threshold is far above secsLeft
+                    // (i.e. we joined the race after the boundary).
+                    const crossingNow = (secsLeft <= ms.sec && secsLeft > ms.sec - 60);
+                    if (crossingNow && !firedMilestones[ms.sec]) {
                         firedMilestones[ms.sec] = true;
                         const tpl = pickLine(LINES.COUNTDOWN.timerMilestones, 'countdown');
                         // Per spec v3.6: milestones render as commentary
