@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.0
+// @version      3.8.1
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.0';
+    const SCRIPT_VERSION = '3.8.1';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -6153,7 +6153,7 @@
         } else if (keyAccessFlags.carsOK) {
             tier = 'Minimal key (full access)';
             tierColor = 'var(--c-green)';
-        } else if (keyAccessFlags.tracksOK || keyAccessFlags.recordsOK) {
+        } else if (keyAccessFlags.tracksOK || keyAccessFlags.recordsOK || keyAccessFlags.racesOK) {
             tier = 'Public key (limited access)';
             tierColor = 'var(--c-blue)';
         } else {
@@ -6179,6 +6179,17 @@
         }
         if (carsCache && Array.isArray(carsCache.cars) && carsCache.cars.length) {
             lines.push(carsCache.cars.length + ' enlisted cars cached');
+        }
+        // Per spec v3.8.1: surface races API access in the diagnostic
+        // so the user can confirm the /v2/racing/races endpoint is
+        // returning data. Counts both categories combined - the
+        // current-day numbers are most useful for verification.
+        if (racesCache) {
+            const o = Array.isArray(racesCache.official) ? racesCache.official.length : 0;
+            const c = Array.isArray(racesCache.custom) ? racesCache.custom.length : 0;
+            if (o + c > 0) {
+                lines.push(o + ' official, ' + c + ' custom races cached (current schedule)');
+            }
         }
 
         // Build current-context detail (if available) - useful for
@@ -6531,8 +6542,12 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       <strong style="color:var(--c-blue);">Public key</strong> &mdash;
       unlocks <em>track descriptions</em> (16 Torn tracks, ~108 keyword-
       derived flavour lines weaving location/surface/feature detail into
-      commentary), and <em>track records</em> (top class lap times with
-      "Only 1.2s off the record" style references in lap-time commentary).<br><br>
+      commentary), <em>track records</em> (top class lap times with
+      "Only 1.2s off the record" style references in lap-time commentary),
+      and <em>current races schedule</em> (custom and official races
+      in progress and completed today for the current track, woven into
+      COUNTDOWN commentary - "{track} has been busy today, X have been
+      run so far").<br><br>
       <strong style="color:var(--c-green);">Minimal key</strong> &mdash;
       everything above, PLUS <em>your enlisted-cars data</em>: car
       attribute classification (top speed, acceleration, braking,
