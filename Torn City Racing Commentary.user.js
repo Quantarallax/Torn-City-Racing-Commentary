@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.7.0
+// @version      3.7.1
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.7.0';
+    const SCRIPT_VERSION = '3.7.1';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4249,8 +4249,12 @@
                 // Per spec v3.7: reset BEST tracking and the POS arrow
                 // baseline so each new race builds its own position
                 // history from scratch.
+                // Per spec v3.7.1: clear the persisted arrow direction
+                // too so the first sample of the new race defaults to
+                // up (green) rather than inheriting last race's red/down.
                 state.bestPosition = 0;
                 state.lastArrowPos = 0;
+                state.posArrowDir = null;
                 state.lastLapMsgFired = false;
                 state.racers = [];
                 state.prevRacers = [];
@@ -5782,26 +5786,41 @@
         }
         const bestNum = focusActive ? posNum : state.bestPosition;
         sv('tc-ib-best', bestNum >= 1 ? ordinal(bestNum) : '-');
-        // Per spec v3.7: POS arrow indicator. Default grey arrow points
-        // right (no change / pre-race). Green up-arrow when position
-        // improved (number decreased), red down-arrow when it worsened.
-        // Compare against state.lastRenderedPosition so multiple polls
-        // at the same position don't flash the arrow.
+        // Per spec v3.7: POS arrow indicator. Per spec v3.7.1 refinements:
+        // arrow sits LEFT of the POS label. The colour PERSISTS - once the
+        // arrow has gone up (green) or down (red), it holds that state
+        // and colour until the OPPOSITE direction fires, regardless of
+        // how many polls show an unchanged position. Grey/flat is now
+        // reserved for non-racing statuses ONLY; during racing the arrow
+        // is always green or red. First sample of a new race defaults to
+        // up/green (no prior comparison yet, but spec forbids grey here).
         const arrow = document.getElementById('tc-ib-pos-arrow');
         if (arrow) {
             arrow.classList.remove('tc-pos-arrow-up', 'tc-pos-arrow-down', 'tc-pos-arrow-flat');
-            if (focusActive || !posNum || !isRacingLike(state.status)) {
+            const isRacing = isRacingLike(state.status);
+            if (focusActive || !isRacing) {
+                // Non-racing OR focus on another racer: grey right-arrow.
                 arrow.classList.add('tc-pos-arrow-flat');
-                arrow.innerHTML = '&#x25B6;'; // ▶ right (neutral / default)
-            } else if (typeof state.lastArrowPos === 'number' && posNum < state.lastArrowPos) {
-                arrow.classList.add('tc-pos-arrow-up');
-                arrow.innerHTML = '&#x25B2;'; // ▲ up (gained)
-            } else if (typeof state.lastArrowPos === 'number' && posNum > state.lastArrowPos) {
-                arrow.classList.add('tc-pos-arrow-down');
-                arrow.innerHTML = '&#x25BC;'; // ▼ down (lost)
+                arrow.innerHTML = '&#x25B6;'; // ▶
             } else {
-                arrow.classList.add('tc-pos-arrow-flat');
-                arrow.innerHTML = '&#x25B6;'; // unchanged or first sample
+                // Racing context. Update direction on any actual change;
+                // otherwise hold whatever direction was last set.
+                if (posNum >= 1 && typeof state.lastArrowPos === 'number' && state.lastArrowPos >= 1) {
+                    if (posNum < state.lastArrowPos) state.posArrowDir = 'up';
+                    else if (posNum > state.lastArrowPos) state.posArrowDir = 'down';
+                    // posNum === lastArrowPos: keep state.posArrowDir as-is.
+                }
+                // First sample of the race (no prior comparison) - default
+                // to up. Better than flat/grey since spec forbids grey
+                // during racing, and "up" reads as optimistic open-state.
+                if (!state.posArrowDir) state.posArrowDir = 'up';
+                if (state.posArrowDir === 'down') {
+                    arrow.classList.add('tc-pos-arrow-down');
+                    arrow.innerHTML = '&#x25BC;'; // ▼
+                } else {
+                    arrow.classList.add('tc-pos-arrow-up');
+                    arrow.innerHTML = '&#x25B2;'; // ▲
+                }
             }
             if (!focusActive && posNum) state.lastArrowPos = posNum;
         }
@@ -6120,8 +6139,10 @@
 .fl-milestone{color:#aaaaaa;}
 /* Per spec v3.7: POS arrow indicator. Default state is grey, pointing
    right (no change). Green-up when the player gains a position, red-
-   down when they lose one. */
-.tc-pos-arrow{margin-left:4px;font-size:11px;display:inline-block;}
+   down when they lose one.
+   Per spec v3.7.1: arrow sits to the LEFT of the POS label text. Margin
+   adjusted to give a small gap between the arrow and "POS". */
+.tc-pos-arrow{margin-right:3px;font-size:10px;display:inline-block;vertical-align:middle;}
 .tc-pos-arrow-flat{color:#888888;}
 .tc-pos-arrow-up{color:#3fdd5f;}
 .tc-pos-arrow-down{color:#ff5a5a;}
@@ -6240,7 +6261,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
       <div class="tc-ib-sep"></div>
       <div class="tc-ib-cell"><div class="tc-ib-lbl">CAR</div><div class="tc-ib-val" id="tc-ib-car">&#8212;</div></div>
       <div class="tc-ib-sep"></div>
-      <div class="tc-ib-cell"><div class="tc-ib-lbl">POS</div><div class="tc-ib-val"><span id="tc-ib-pos">&#8212;</span><span class="tc-pos-arrow tc-pos-arrow-flat" id="tc-ib-pos-arrow">&#x25B6;</span></div></div>
+      <div class="tc-ib-cell"><div class="tc-ib-lbl"><span class="tc-pos-arrow tc-pos-arrow-flat" id="tc-ib-pos-arrow">&#x25B6;</span>POS</div><div class="tc-ib-val"><span id="tc-ib-pos">&#8212;</span></div></div>
       <div class="tc-ib-sep"></div>
       <div class="tc-ib-cell"><div class="tc-ib-lbl">BEST</div><div class="tc-ib-val" id="tc-ib-best">&#8212;</div></div>
     </div>
