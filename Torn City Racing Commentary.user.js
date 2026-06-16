@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.7.1
+// @version      3.7.2
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.7.1';
+    const SCRIPT_VERSION = '3.7.2';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -3694,11 +3694,21 @@
         });
 
         candidates.forEach(function (crashEl) {
-            // Per spec, walk up to the enclosing racer row. Each row uses the
-            // class pattern lbr-{id}; fall back to any <li>/driver/racer wrapper
-            // if Torn's class scheme has shifted.
+            // Per spec, walk up to the enclosing racer row. Per spec
+            // v3.7.2 clarification: the provided crash HTML uses
+            // <ul class="driver-item driver-item_NEXT"> as the row
+            // container, with <li class="status-wrap"> and
+            // <li class="name"> as SIBLING children. If we walk only as
+            // far as the immediate <li>, we land on status-wrap and
+            // can't find the name (which is a sibling). So prefer the
+            // driver-item UL/DIV ancestor over the immediate <li>.
             const lbrRow = crashEl.closest('li[class*="lbr-"], li[class*="lbr_"]');
+            const driverRow = crashEl.closest(
+                'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"], '
+                + 'div.driver-item, div[class*="driver-item"], div[class*="driver_item"]'
+            );
             const li = lbrRow ||
+                       driverRow ||
                        crashEl.closest('li') ||
                        crashEl.closest('[class*="driver"]') ||
                        crashEl.closest('[class*="racer"]');
@@ -5340,9 +5350,17 @@
             if (m.closest('#tc-rc-hud')) continue;
             if (isInsideTornMenu(m)) continue;
             // Walk up to the enclosing racer row. Try the spec's lbr- pattern
-            // first, then fall back to any <li> ancestor.
+            // first, then the driver-item UL/DIV (per spec v3.7.2 HTML
+            // example - the row container is <ul class="driver-item">,
+            // not an <li class="lbr-...">). Only fall back to plain <li>
+            // last, since that would land on status-wrap and miss the
+            // sibling name <li>.
             const lbrRow = m.closest('li[class*="lbr-"], li[class*="lbr_"]');
-            const li = lbrRow || m.closest('li') ||
+            const driverRow = m.closest(
+                'ul.driver-item, ul[class*="driver-item"], ul[class*="driver_item"], '
+                + 'div.driver-item, div[class*="driver-item"], div[class*="driver_item"]'
+            );
+            const li = lbrRow || driverRow || m.closest('li') ||
                        m.closest('[class*="driver"]') || m.closest('[class*="racer"]');
             if (!li) continue;
             if (looksLikeEventsRow(li)) continue;
