@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.7.2
+// @version      3.8.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.7.2';
+    const SCRIPT_VERSION = '3.8.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -98,10 +98,21 @@
     // one at random per spec v2.78.
     let carsCache = null;
     let carsFetchInFlight = false;
-    // keyAccessFlags schema: { tracksOK, recordsOK, carsOK } - set after the
+    // Per spec v3.8.0: racesCache holds the recent list of in-progress and
+    // completed races by category (official, custom) from the
+    // /v2/racing/races endpoint. Used to populate COUNTDOWN commentary
+    // lines that quote current-day race counts for the player's track.
+    // Schema: { fetchedAt, official:[races], custom:[races] }. A race
+    // entry has { id, title, status, trackId } at minimum - extra fields
+    // are kept but only the count-by-track is consumed.
+    let racesCache = null;
+    let racesFetchInFlight = { official: false, custom: false };
+    const RACES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+    // keyAccessFlags schema: { tracksOK, recordsOK, carsOK, racesOK } -
+    // racesOK added per v3.8.0.
     // first request of each type returns. Helps the settings page describe
     // what's actually working with the current key (vs what we'd expect).
-    let keyAccessFlags = { tracksOK: false, recordsOK: false, carsOK: false };
+    let keyAccessFlags = { tracksOK: false, recordsOK: false, carsOK: false, racesOK: false };
 
     // ─── SVG Icons ───────────────────────────────────────────────────────────────
     const ICON = {
@@ -461,6 +472,20 @@
             // described, which lands more authentic. Urgency escalates
             // across the pool from "easy banter" early on through to
             // "barked instructions" near pre-launch.
+            // Per spec v3.8.0: scheduled-races commentary populated from
+            // the /v2/racing/races endpoint. These lines quote
+            // current-day race counts for the player's track. Only
+            // entered into the random rotation when the cache has data
+            // (gated via raceCountsAvailable inside ambientPoolFor).
+            // Templates use the same {token} convention as the rest of
+            // the pool - {track}, {raceCountTotal}, {customRaceCount},
+            // {officialRaceCount}, {completedRaceCount}.
+            raceSchedule: [
+                "Can you believe there's {raceCountTotal} races scheduled for today on {track}.",
+                "Full schedule today on {track}, the rosta shows {customRaceCount} custom races in progress.",
+                "{track} isn't getting much use today, only {raceCountTotal} scheduled - {customRaceCount} custom, {officialRaceCount} official.",
+                "{track} has been busy today, {completedRaceCount} have been run so far."
+            ],
             radioComms: [
                 'Scanner picks up casual banter between {player} and the crew. All easy.',
                 'Crew chatter to {p2} - the tone is relaxed. Plenty of time still.',
@@ -1542,6 +1567,124 @@
     // Look up the cached top record (lowest lap_time) for the current track
     // and player car class. Returns { lap_time, driver_name, car_item_name }
     // or null if not available. Triggers a background fetch on miss.
+    // Per spec v3.8.0: fetch the recent races list for one category
+    // (official or custom) from /v2/racing/races. This endpoint is
+    // public on the v2 API and works with either a public or minimal
+    // key. We refetch on a 5-minute cooldown so the COUNTDOWN lines
+    // quoting race counts stay reasonably current without hammering
+    // the API. Both categories are pulled separately so we can break
+    // the counts down by type in commentary.
+    function fetchRaces (cat) {
+        if (cat !== 'official' && cat !== 'custom') return;
+        if (racesFetchInFlight[cat]) return;
+        if (!racesCache) racesCache = { fetchedAt: 0, official: [], custom: [] };
+        // 5-minute cooldown per category.
+        const lastFetched = racesCache[cat + 'FetchedAt'] || 0;
+        if (Date.now() - lastFetched < RACES_CACHE_TTL_MS) return;
+        const key = getApiKey();
+        if (!key) return;
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+        racesFetchInFlight[cat] = true;
+        try {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://api.torn.com/v2/racing/races?limit=100&sort=DESC&cat='
+                    + encodeURIComponent(cat) + '&key=' + encodeURIComponent(key),
+                timeout: 15000,
+                onload: function (resp) {
+                    racesFetchInFlight[cat] = false;
+                    try {
+                        if (resp.status !== 200) {
+                            console.warn('[TC Race Commentary] races API non-200:', resp.status);
+                            return;
+                        }
+                        const json = JSON.parse(resp.responseText || '{}');
+                        if (json.error) {
+                            console.warn('[TC Race Commentary] races API error:', json.error);
+                            return;
+                        }
+                        const races = Array.isArray(json.races) ? json.races : [];
+                        racesCache[cat] = races;
+                        racesCache[cat + 'FetchedAt'] = Date.now();
+                        racesCache.fetchedAt = Date.now();
+                        keyAccessFlags.racesOK = true;
+                    } catch (e) {
+                        console.warn('[TC Race Commentary] races API parse:', e);
+                    }
+                },
+                onerror: function () { racesFetchInFlight[cat] = false; },
+                ontimeout: function () { racesFetchInFlight[cat] = false; }
+            });
+        } catch (e) {
+            racesFetchInFlight[cat] = false;
+        }
+    }
+
+    // Per spec v3.8.0: convenience caller - fetch both categories. The
+    // per-cat 5-minute cooldown inside fetchRaces() keeps this idempotent
+    // when called frequently.
+    function fetchAllRaces () {
+        fetchRaces('official');
+        fetchRaces('custom');
+    }
+
+    // Per spec v3.8.0: are race-count tokens populatable right now? The
+    // four COUNTDOWN ambient templates referencing scheduled-race counts
+    // should only enter the random rotation when we have cache data for
+    // the current track - empty-string substitution reads wrong ("only
+    //  scheduled" with the leading double-space).
+    function raceCountsAvailable () {
+        const c = getRaceCountsForTrack(state.track);
+        if (!c) return false;
+        // At least ONE of the counts must be > 0 for any of the lines
+        // to read naturally. A zero/zero/zero/zero record is what we
+        // get just after init before the first fetch returns.
+        return c.totalInProgress > 0 || c.completed > 0;
+    }
+
+    // Per spec v3.8.0: derive race counts for the current track from the
+    // races cache. Returns { totalInProgress, customInProgress,
+    // officialInProgress, completed }. Uses the resolved track ID
+    // (matched via getTrackInfo on the track title) and classifies
+    // status strings into "in progress" (anything pre-finish: signup,
+    // before_start, in_progress, started) versus "completed" (finished).
+    // Returns null when no cache or no resolved track.
+    function getRaceCountsForTrack (trackTitle) {
+        if (!racesCache) return null;
+        const info = getTrackInfo(trackTitle);
+        if (!info || typeof info.id === 'undefined') return null;
+        const tid = info.id;
+        const inProgressStatuses = /^(signup|before_start|in_progress|started|waiting)$/i;
+        const completedStatuses = /^(finished|ended|complete)$/i;
+        function countCat (arr, statusRe) {
+            if (!Array.isArray(arr)) return 0;
+            let n = 0;
+            for (let i = 0; i < arr.length; i++) {
+                const r = arr[i];
+                if (!r) continue;
+                // Track id may live under .track_id, .trackId or .track.id
+                // depending on the API revision. Try each in order.
+                const rt = (typeof r.track_id !== 'undefined') ? r.track_id
+                    : (typeof r.trackId !== 'undefined') ? r.trackId
+                    : (r.track && typeof r.track.id !== 'undefined') ? r.track.id : null;
+                if (rt !== tid) continue;
+                const st = String(r.status || '');
+                if (statusRe.test(st)) n++;
+            }
+            return n;
+        }
+        const customInProgress = countCat(racesCache.custom, inProgressStatuses);
+        const officialInProgress = countCat(racesCache.official, inProgressStatuses);
+        const customCompleted = countCat(racesCache.custom, completedStatuses);
+        const officialCompleted = countCat(racesCache.official, completedStatuses);
+        return {
+            totalInProgress: customInProgress + officialInProgress,
+            customInProgress: customInProgress,
+            officialInProgress: officialInProgress,
+            completed: customCompleted + officialCompleted
+        };
+    }
+
     function getTopTrackRecord () {
         const info = getTrackInfo(state.track);
         if (!info || typeof info.id === 'undefined') return null;
@@ -2533,6 +2676,17 @@
                 && Array.isArray(LINES.COUNTDOWN.radioComms)) {
                 out = out.concat(LINES.COUNTDOWN.radioComms);
             }
+            // Per spec v3.8.0: scheduled-races sub-pool merges into
+            // COUNTDOWN ambient only when the /v2/racing/races cache
+            // actually has data for the current track. Without the gate
+            // the templates render with empty-string tokens which
+            // produces nonsense like "Full schedule today on Industrial,
+            // the rosta shows  custom races in progress."
+            if (statusLines === LINES.COUNTDOWN
+                && Array.isArray(LINES.COUNTDOWN.raceSchedule)
+                && raceCountsAvailable()) {
+                out = out.concat(LINES.COUNTDOWN.raceSchedule);
+            }
             // Per spec v3.3: official-race extras merge into COUNTDOWN
             // and PRE_LAUNCH ambient when officialRacePending is set.
             // Lines cover points structure, balanced field, bands and
@@ -2670,6 +2824,27 @@
                 return Math.random() < 0.5 ? 'at the back' : 'in last position';
             })(),
             total: String(state.racerCount || state.racers.length || '?'),
+            // Per spec v3.8.0: race-count tokens populated from the
+            // /v2/racing/races cache. Returns '' (empty string) when
+            // no data is available - the radio-chatter callers gate
+            // on raceCountsAvailable() so empty-string fallback is a
+            // belt-and-braces guard. Counts are per current track.
+            raceCountTotal: (function () {
+                const c = getRaceCountsForTrack(state.track);
+                return c ? String(c.totalInProgress) : '';
+            })(),
+            customRaceCount: (function () {
+                const c = getRaceCountsForTrack(state.track);
+                return c ? String(c.customInProgress) : '';
+            })(),
+            officialRaceCount: (function () {
+                const c = getRaceCountsForTrack(state.track);
+                return c ? String(c.officialInProgress) : '';
+            })(),
+            completedRaceCount: (function () {
+                const c = getRaceCountsForTrack(state.track);
+                return c ? String(c.completed) : '';
+            })(),
             // Per spec v2.90 BUG FIX: lights vs flag start signal. Illegal
             // races (everything but Speedway) use a flag drop, so any line
             // that references "lights are about to come on" reads wrong.
@@ -4310,6 +4485,12 @@
 
         if (newSt === S.COUNTDOWN) {
             fireEntryMessages();
+            // Per spec v3.8.0: refresh the races cache when entering
+            // COUNTDOWN. The per-cat 5-minute cooldown inside fetchRaces
+            // makes this cheap on consecutive entries. Without this kick
+            // the cache could be 5 minutes stale by the time the player
+            // joins a race.
+            try { fetchAllRaces(); } catch (_) {}
         }
         if (newSt === S.PRE_LAUNCH && oldSt !== S.PRE_LAUNCH) {
             // Only announce an entry if we came from MENU/unknown - not from COUNTDOWN,
@@ -6399,6 +6580,8 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
                 if (getApiKey()) {
                     if (!tracksCache) fetchTracksFromApi();
                     fetchEnlistedCars();
+                    // Per spec v3.8.0: also kick the races cache.
+                    fetchAllRaces();
                 }
             } catch (_) {}
             refreshKeyDiagnostic();
@@ -6567,6 +6750,10 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
             // Warm the tracks cache on startup so apiAmbient lines become
             // available as soon as possible. If no key is set, this no-ops.
             try { fetchTracksFromApi(); } catch (_) {}
+            // Per spec v3.8.0: warm the races cache for both categories
+            // at startup. The 5-minute per-cat cooldown inside fetchRaces
+            // protects against repeated calls. No-op without an API key.
+            try { fetchAllRaces(); } catch (_) {}
             // Per spec v2.79: hydrate keyAccessFlags from any existing
             // caches so the settings-page diagnostic reflects historical
             // success across page refreshes - not just the current session.
