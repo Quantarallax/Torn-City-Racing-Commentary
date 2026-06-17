@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.9.5
+// @version      3.9.6
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.9.5';
+    const SCRIPT_VERSION = '3.9.6';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -5822,11 +5822,21 @@
                 // races below 100 won't fire from this trigger - reading
                 // their specific cap would need an extra API integration
                 // and is out of scope here.
+                // Per spec v3.9.6 BUG FIX: gate on newStatus (the
+                // freshly-detected status this poll) rather than
+                // state.status (last poll's value). When the player
+                // opens an already-running race, state.status still
+                // reflects a stale persisted COUNTDOWN/PRE-LAUNCH from
+                // a prior session, while racerCount=0 init plus
+                // posData.total=cap satisfies the upward-crossing
+                // condition - leading to a spurious fire on RACING
+                // entry. newStatus correctly reads as RACING and
+                // suppresses the message as the spec requires.
                 const fieldCap = state.officialRacePending ? 6 : 100;
                 if (posData.total >= fieldCap
                     && state.racerCount < fieldCap
                     && !state.fieldFullFired
-                    && (state.status === S.COUNTDOWN || state.status === S.PRE_LAUNCH)) {
+                    && (newStatus === S.COUNTDOWN || newStatus === S.PRE_LAUNCH)) {
                     state.fieldFullFired = true;
                     pushLine("That's it, the field is full and decided.", 'status', ICON.flag);
                 }
