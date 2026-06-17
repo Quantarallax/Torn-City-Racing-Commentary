@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.9.2
+// @version      3.9.5
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.9.2';
+    const SCRIPT_VERSION = '3.9.5';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4598,12 +4598,6 @@
                 // Per spec v3.6: reset the 100-racer field-full latch so
                 // the next race can fire its own one-shot when applicable.
                 state.fieldFullFired = false;
-                // Per spec v3.9.2: reset the RACE FULL one-shot latch.
-                // Entry into a real race phase (COUNTDOWN/PRE-LAUNCH/
-                // RACING) means the player is past any "join blocked"
-                // error, so the next time they encounter a full race the
-                // sequence is free to fire again.
-                state.raceFullFired = false;
                 // Per spec v3.7: reset BEST tracking and the POS arrow
                 // baseline so each new race builds its own position
                 // history from scratch.
@@ -4754,10 +4748,6 @@
             // sign-up, didn't pick a race, went back to menu" so a
             // subsequent regular race doesn't get official-event lines.
             state.officialRacePending = false;
-            // Per spec v3.9.2: clear the RACE FULL latch on MENU return
-            // too, so a subsequent join-attempt to a different full race
-            // gets its own sequence rather than being permanently muted.
-            state.raceFullFired = false;
         }
         if (newSt === S.ENDED) {
             state.completion = '100%';
@@ -4801,16 +4791,7 @@
             pushLine('There are no racers, it is deserted.', 'status');
             pushLine('Race has already started.', 'status');
         }
-        if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL && !state.raceFullFired) {
-            // Per spec v3.9.2: "Do not print the message again." The
-            // outer transition gate (oldSt !== S.RACE_FULL) handles the
-            // simple case, but if status flickers - misdetection in/out
-            // of RACE_FULL during page load or DOM churn - the gate
-            // could fire repeatedly. The raceFullFired latch belt-and-
-            // braces this so the 3-line sequence fires once per
-            // encounter, then stays silent until the player legitimately
-            // leaves to MENU or enters a different race phase.
-            state.raceFullFired = true;
+        if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL) {
             clearFeed();
             const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
@@ -5830,17 +5811,20 @@
             // Always trust this value; it's the authoritative Torn count.
             if (posData.total > 0) {
                 // Per spec v3.6: one-shot "field is full and decided"
-                // commentary when racer count reaches the 100-driver cap
-                // during COUNTDOWN or PRE-LAUNCH. Latched on
-                // state.fieldFullFired so it can't fire twice.
-                // Per spec v3.9.1: dropped the previous "upward crossing
-                // from <100" requirement. The original gate meant that
-                // if the player joined PRE-LAUNCH directly with the
-                // field already at 100, the line never fired (no
-                // crossing was observed). Now fires as soon as we see
-                // 100+ in either state, gated only by the
-                // one-shot-per-race latch.
-                if (posData.total >= 100
+                // commentary when racer count reaches the race's
+                // racer-limit during COUNTDOWN or PRE-LAUNCH. Latched
+                // on state.fieldFullFired so it can't fire twice. Fires
+                // only on the upward crossing from below cap to cap.
+                // Per spec v3.9.5: cap is now race-specific. Official
+                // races cap at 6 (per the OFFICIAL RACE spec block:
+                // "the number of racers is limited to six"); everything
+                // else defaults to the 100-driver standard cap. Custom
+                // races below 100 won't fire from this trigger - reading
+                // their specific cap would need an extra API integration
+                // and is out of scope here.
+                const fieldCap = state.officialRacePending ? 6 : 100;
+                if (posData.total >= fieldCap
+                    && state.racerCount < fieldCap
                     && !state.fieldFullFired
                     && (state.status === S.COUNTDOWN || state.status === S.PRE_LAUNCH)) {
                     state.fieldFullFired = true;
