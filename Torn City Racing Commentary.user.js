@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.9.1
+// @version      3.9.2
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.9.1';
+    const SCRIPT_VERSION = '3.9.2';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4598,6 +4598,12 @@
                 // Per spec v3.6: reset the 100-racer field-full latch so
                 // the next race can fire its own one-shot when applicable.
                 state.fieldFullFired = false;
+                // Per spec v3.9.2: reset the RACE FULL one-shot latch.
+                // Entry into a real race phase (COUNTDOWN/PRE-LAUNCH/
+                // RACING) means the player is past any "join blocked"
+                // error, so the next time they encounter a full race the
+                // sequence is free to fire again.
+                state.raceFullFired = false;
                 // Per spec v3.7: reset BEST tracking and the POS arrow
                 // baseline so each new race builds its own position
                 // history from scratch.
@@ -4748,6 +4754,10 @@
             // sign-up, didn't pick a race, went back to menu" so a
             // subsequent regular race doesn't get official-event lines.
             state.officialRacePending = false;
+            // Per spec v3.9.2: clear the RACE FULL latch on MENU return
+            // too, so a subsequent join-attempt to a different full race
+            // gets its own sequence rather than being permanently muted.
+            state.raceFullFired = false;
         }
         if (newSt === S.ENDED) {
             state.completion = '100%';
@@ -4791,7 +4801,16 @@
             pushLine('There are no racers, it is deserted.', 'status');
             pushLine('Race has already started.', 'status');
         }
-        if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL) {
+        if (newSt === S.RACE_FULL && oldSt !== S.RACE_FULL && !state.raceFullFired) {
+            // Per spec v3.9.2: "Do not print the message again." The
+            // outer transition gate (oldSt !== S.RACE_FULL) handles the
+            // simple case, but if status flickers - misdetection in/out
+            // of RACE_FULL during page load or DOM churn - the gate
+            // could fire repeatedly. The raceFullFired latch belt-and-
+            // braces this so the 3-line sequence fires once per
+            // encounter, then stays silent until the player legitimately
+            // leaves to MENU or enters a different race phase.
+            state.raceFullFired = true;
             clearFeed();
             const safeName = (state.playerName !== '-' && state.playerName)
                 ? state.playerName : 'The driver';
