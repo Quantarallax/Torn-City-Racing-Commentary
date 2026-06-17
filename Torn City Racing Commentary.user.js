@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.9
+// @version      3.9.0
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.9';
+    const SCRIPT_VERSION = '3.9.0';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -604,13 +604,26 @@
             ]
         },
         WAITING: {
-            ambient: [
+            // Per spec v3.9.0: WAITING ambient now splits by racer count.
+            // ambientMulti fires when state.racerCount > 1 (other drivers
+            // are present, just not enough to start). ambientSolo fires
+            // when state.racerCount <= 1 (the player is alone on the
+            // grid, waiting for ANY other driver to show up). The original
+            // ambient pool corresponds to the multi case - it always
+            // implies someone else is needed - so those lines move into
+            // ambientMulti. The three solo lines below are new.
+            ambientMulti: [
                 'Which idiot put a number of racers limit on this?',
                 '{player} fiddles with the gear stick, willing someone else to join.',
                 'Engines rev in annoyance.',
                 'The organisers stare at the empty grid. Come on, people.',
                 'Awkward silence. More drivers needed before we can race.',
                 'Someone in the stands shouts "Let\'s get going!" Not yet, friend.'
+            ],
+            ambientSolo: [
+                "Maybe this track isn't popular.",
+                '{player} tunes into a music station while waiting.',
+                'Anxious to start, {player} starts revving the engine hot.'
             ]
         },
         // Per spec v3.3: OFFICIAL RACE extras pool. Merged into COUNTDOWN,
@@ -3603,7 +3616,16 @@
 
         if (st === S.WAITING) {
             if (now >= tWaiting) {
-                pushLine(fill(pickLine(LINES.WAITING.ambient, 'waiting')), 'waiting', ICON.wait);
+                // Per spec v3.9.0: select pool by racer count. >1 means
+                // the player has company on the grid waiting for the
+                // limit to be met; <=1 means the player is alone. The
+                // <=1 branch also handles the rare scrape-failure case
+                // where racerCount is 0 - "alone on grid" reads OK in
+                // that scenario too.
+                const waitPool = (state.racerCount > 1)
+                    ? LINES.WAITING.ambientMulti
+                    : LINES.WAITING.ambientSolo;
+                pushLine(fill(pickLine(waitPool, 'waiting')), 'waiting', ICON.wait);
                 tWaiting = now + WAITING_GAP + Math.random() * 30000;
             }
         }
