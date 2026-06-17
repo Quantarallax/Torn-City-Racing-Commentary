@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.8
+// @version      3.8.9
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.8';
+    const SCRIPT_VERSION = '3.8.9';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -3878,6 +3878,24 @@
         [0, 2500, 5000, 8500].forEach(function (d, i) {
             setTimeout(function () { pushLine(msgs[i], 'crash'); }, d);
         });
+        // Per spec v3.8.9: in a TWO-racer race, when the other racer
+        // crashes the player is suddenly alone on the track. Add a
+        // dedicated "solo runner" stinger after the standard crash
+        // sequence - 10 seconds from now then a 2-second beat - so it
+        // lands a moment after the "rushed to hospital" line. Same
+        // 'crash' type so it colours like the rest of the crash text.
+        if (state.racerCount === 2) {
+            setTimeout(function () {
+                pushLine('Well, this is a turn up for the books!', 'crash');
+            }, 10000);
+            setTimeout(function () {
+                const name = state.playerName || 'the lone runner';
+                pushLine(
+                    'A single racer race, just ' + name + ' against the clock!!',
+                    'crash'
+                );
+            }, 12000);
+        }
     }
 
     // Detect other players who have crashed by scraping Torn's crash UI markers.
