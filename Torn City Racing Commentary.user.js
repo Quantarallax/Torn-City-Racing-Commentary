@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.6
+// @version      3.8.8
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.6';
+    const SCRIPT_VERSION = '3.8.8';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4202,10 +4202,10 @@
         '{name} takes the chequered flag - race over for them.',
         '{name} is done. Finish time on the board.',
         '{name} brings it home. The work is finished.',
-        '{name} crosses the line, race complete.',
+        '{name} crosses the line. Their race is in the books.',
         'And that\'s {name} across the line.',
         '{name} finishes. One less car on the track.',
-        '{name} crosses the timing strip - race over.'
+        '{name} crosses the timing strip - they are done.'
     ];
     const OTHER_FINISH_WITH_PREV = [
         '{name} crosses just {gap} back of {prev}. A real scrap right to the line.',
@@ -4313,7 +4313,18 @@
         // state.finishers and fire commentary. This way the order is
         // driven by the times themselves, not by whatever DOM order
         // happened to be observed.
+        // Per spec v3.8.7 BUG FIX: simultaneously capture the player's
+        // own finish time if it appears in this scan, so we can suppress
+        // commentary for any other-finisher whose time is at or after
+        // the player's. The previous guard ("if player is in
+        // knownFinishers") only worked AFTER transitionTo had run and
+        // added the player - but detectOtherFinishers runs BEFORE that
+        // in the poll, so when two racers cross the line in the same
+        // poll window, the slower one would fire a commentary line in
+        // violation of the spec rule "It will not display other players
+        // who finish afterwards."
         const newlyFinished = [];
+        let playerFinishSec = null;
         rows.forEach(function (row) {
             if (isInsideTornMenu(row)) return;
             if (looksLikeEventsRow(row)) return;
@@ -4343,9 +4354,16 @@
             if (!name || name.length < 2 || name.length > 40) return;
             if (/^\d+$/.test(name)) return;
             if (/^You(\s|$)/.test(name)) return;
-            // Don't double-record. The player gets added by the existing
-            // ENDED-status path; we just record non-player finishers here.
-            if (name === state.playerName) return;
+            // Per spec v3.8.7: if this IS the player's row and they
+            // have a finish time, capture it so we can suppress any
+            // other-finisher whose time is at or after this. Don't
+            // record the player as an "other finisher" - the ENDED
+            // status handler does that.
+            if (name === state.playerName) {
+                const psec = parseFinishTimeToSec(tText);
+                if (psec !== null) playerFinishSec = psec;
+                return;
+            }
             if (knownFinishers.has(name)) return;
             if (otherCrashedNames.has(name)) return;
             newlyFinished.push({ name: name, time: tText });
@@ -4374,13 +4392,20 @@
             // entry with optional proximity flavour. Skipped once the
             // player has finished (original spec: "It will not display
             // other players who finish afterwards").
+            // Per spec v3.8.7: if the player ALSO has a finish time in
+            // this scan, suppress commentary for any entry whose time
+            // is at or after the player's. We still register them as
+            // known finishers (so they don't trigger repeatedly) and
+            // we still push to state.finishers (so leaderboard stays
+            // intact), but no commentary fires.
             knownFinishers.add(entry.name);
-            // Push into state.finishers too, with whatever position info we
-            // can muster. We don't strictly need the position for any
-            // downstream logic, but maintaining the shape keeps state
-            // serialisation consistent across versions.
             state.finishers.push(entry);
-            if (!knownFinishers.has(state.playerName)) {
+            const entrySec = parseFinishTimeToSec(entry.time);
+            const playerHasFinished = (playerFinishSec !== null) || knownFinishers.has(state.playerName);
+            const finishedAfterPlayer = (playerFinishSec !== null
+                                          && entrySec !== null
+                                          && entrySec >= playerFinishSec);
+            if (!playerHasFinished || (playerFinishSec !== null && !finishedAfterPlayer)) {
                 fireOtherFinisherLine(entry);
             }
         }
