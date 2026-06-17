@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.5
+// @version      3.8.6
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.5';
+    const SCRIPT_VERSION = '3.8.6';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -4302,6 +4302,18 @@
             'div.driver-item, div[class*="driver-item"], div[class*="driver_item"]'
         );
         if (!rows || !rows.length) return;
+
+        // Per spec v3.8.6: in close finishes, racers MUST be reported in
+        // actual finish order. DOM order is usually leaderboard order
+        // (which after a finish IS finish order), but there are transient
+        // states - particularly when two racers cross the line between
+        // polls - where the rows haven't been re-sorted by Torn yet. To
+        // guard against that we collect all newly-detected finishers
+        // here, sort by parsed finish time, and only then push to
+        // state.finishers and fire commentary. This way the order is
+        // driven by the times themselves, not by whatever DOM order
+        // happened to be observed.
+        const newlyFinished = [];
         rows.forEach(function (row) {
             if (isInsideTornMenu(row)) return;
             if (looksLikeEventsRow(row)) return;
@@ -4336,25 +4348,64 @@
             if (name === state.playerName) return;
             if (knownFinishers.has(name)) return;
             if (otherCrashedNames.has(name)) return;
-            // Record the finisher. Per spec v3.6: when ANOTHER racer
-            // crosses the line while the player is still racing, fire
-            // a finish-line commentary entry with optional proximity
-            // flavour. Skipped once the player has finished (original
-            // spec: "It will not display other players who finish
-            // afterwards").
-            knownFinishers.add(name);
+            newlyFinished.push({ name: name, time: tText });
+        });
+
+        if (!newlyFinished.length) return;
+
+        // Sort ascending by parsed time. parseFinishTimeToSec returns null
+        // for unparseable strings; those sort last so they don't disturb
+        // the order of the well-formed entries. Sort is stable on modern
+        // engines so equal times keep their DOM relative order.
+        newlyFinished.sort(function (a, b) {
+            const sa = parseFinishTimeToSec(a.time);
+            const sb = parseFinishTimeToSec(b.time);
+            if (sa === null && sb === null) return 0;
+            if (sa === null) return 1;
+            if (sb === null) return -1;
+            return sa - sb;
+        });
+
+        // Now process in actual finish order.
+        for (let i = 0; i < newlyFinished.length; i++) {
+            const entry = newlyFinished[i];
+            // Per spec v3.6: when ANOTHER racer crosses the line while
+            // the player is still racing, fire a finish-line commentary
+            // entry with optional proximity flavour. Skipped once the
+            // player has finished (original spec: "It will not display
+            // other players who finish afterwards").
+            knownFinishers.add(entry.name);
             // Push into state.finishers too, with whatever position info we
             // can muster. We don't strictly need the position for any
             // downstream logic, but maintaining the shape keeps state
             // serialisation consistent across versions.
-            const otherFinishEntry = { name: name, time: tText };
-            state.finishers.push(otherFinishEntry);
-            // Fire only while the player is still racing. We just added
-            // 'name' so check against state.playerName explicitly.
+            state.finishers.push(entry);
             if (!knownFinishers.has(state.playerName)) {
-                fireOtherFinisherLine(otherFinishEntry);
+                fireOtherFinisherLine(entry);
             }
-        });
+        }
+    }
+
+    // Per spec v3.8.6: parse "MM:SS.ss" / "MM:SS" / "HH:MM:SS" /
+    // "HH:MM:SS.ss" into a comparable seconds float. Returns null for
+    // anything that doesn't match. Shares the MM:SS.ss convention with
+    // computeFinishGap above - kept separate so detectOtherFinishers
+    // doesn't pull in the gap-formatting bits.
+    function parseFinishTimeToSec (str) {
+        if (!str) return null;
+        const parts = String(str).split(':');
+        if (parts.length < 2 || parts.length > 3) return null;
+        let h = 0, m = 0, s = 0;
+        if (parts.length === 3) {
+            h = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10);
+            s = parseFloat(parts[2]);
+        } else {
+            m = parseInt(parts[0], 10);
+            s = parseFloat(parts[1]);
+        }
+        if (isNaN(h) || isNaN(m) || isNaN(s)) return null;
+        return h * 3600 + m * 60 + s;
     }
 
     // Filter out crashed racers from any active racer list used for commentary.
