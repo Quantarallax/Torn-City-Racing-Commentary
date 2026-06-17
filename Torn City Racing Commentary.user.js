@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.8.4
+// @version      3.8.5
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,15 +21,18 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.8.4';
+    const SCRIPT_VERSION = '3.8.5';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
 
     const AMBIENT_GAP = 28000;
     const PLAYER_GAP = 14000;
-    // COUNTDOWN and WAITING: one message every ~2 minutes
-    const COUNTDOWN_GAP = 120000;
+    // COUNTDOWN: one message every ~96s base (was 120s pre-v3.8.5) -
+    // raised cadence by 25% to make races feel a bit livelier in the
+    // wait phase. WAITING kept at 120s since it's a holding pattern
+    // rather than an active build-up.
+    const COUNTDOWN_GAP = 96000;
     const POSITION_GAP = 9000;
     const PROXIMITY_GAP = 13000;
     const FUNNY_GAP = 32000;
@@ -3555,11 +3558,11 @@
                     if (picked && picked.indexOf('{trackDesc}') !== -1) markFullDescUsed();
                     pushLine(fill(picked), 'ambient');
                 }
-                tAmbient = now + COUNTDOWN_GAP + Math.random() * 30000;
+                tAmbient = now + COUNTDOWN_GAP + Math.random() * 24000;
             }
             if (now >= tPlayer) {
                 pushLine(fill(pickLine(LINES.COUNTDOWN.player, 'countdown')), 'player');
-                tPlayer = now + COUNTDOWN_GAP + Math.random() * 30000;
+                tPlayer = now + COUNTDOWN_GAP + Math.random() * 24000;
             }
         }
 
