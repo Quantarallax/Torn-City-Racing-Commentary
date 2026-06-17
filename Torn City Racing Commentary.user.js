@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      3.9.0
+// @version      3.9.1
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '3.9.0';
+    const SCRIPT_VERSION = '3.9.1';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -5813,10 +5813,15 @@
                 // Per spec v3.6: one-shot "field is full and decided"
                 // commentary when racer count reaches the 100-driver cap
                 // during COUNTDOWN or PRE-LAUNCH. Latched on
-                // state.fieldFullFired so it can't fire twice. Fires
-                // only on the upward crossing from < 100 to 100.
+                // state.fieldFullFired so it can't fire twice.
+                // Per spec v3.9.1: dropped the previous "upward crossing
+                // from <100" requirement. The original gate meant that
+                // if the player joined PRE-LAUNCH directly with the
+                // field already at 100, the line never fired (no
+                // crossing was observed). Now fires as soon as we see
+                // 100+ in either state, gated only by the
+                // one-shot-per-race latch.
                 if (posData.total >= 100
-                    && state.racerCount < 100
                     && !state.fieldFullFired
                     && (state.status === S.COUNTDOWN || state.status === S.PRE_LAUNCH)) {
                     state.fieldFullFired = true;
