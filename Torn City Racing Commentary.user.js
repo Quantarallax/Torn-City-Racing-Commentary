@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      4.0.1
+// @version      4.0.4
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '4.0.1';
+    const SCRIPT_VERSION = '4.0.4';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -3766,7 +3766,24 @@
                     // "0.1% on Speedway" equals the same physical car gap
                     // regardless of which track is being raced.
                     const threshold = getProximityThresholdForTrack(state.track);
-                    const closePair = findClosestPair(getActiveRacers(), completions, threshold);
+                    // Per spec v4.0.4: when the throttle slider is at
+                    // LESS (value 0), prefer a player-involved pair if
+                    // one exists within threshold even if the absolute
+                    // closest pair on the track is a racer-vs-racer
+                    // duel elsewhere. Falls back to the standard closest
+                    // pair when no player-pair qualifies, so the
+                    // proximity check stays useful at higher slider
+                    // values where racer-vs-racer is also wanted.
+                    const isFullLess = throttleValue <= 0;
+                    let closePair = null;
+                    if (isFullLess && state.playerName) {
+                        closePair = findClosestPlayerPair(
+                            getActiveRacers(), completions, threshold, state.playerName
+                        );
+                    }
+                    if (!closePair) {
+                        closePair = findClosestPair(getActiveRacers(), completions, threshold);
+                    }
                     let usedLingering = false;
                     if (closePair) {
                         // Cooldown per pair so a sustained 0.1% battle
@@ -3795,9 +3812,21 @@
                         // away" lines firmly in tight-battle territory
                         // rather than across-the-screen gaps.
                         const lingerCap = threshold * 2.5;
-                        const lingerPair = findLingeringPair(
-                            getActiveRacers(), completions, threshold, lingerCap
-                        );
+                        // Per spec v4.0.4: same player-preference logic
+                        // for lingering pairs - prefer a player duel in
+                        // the (threshold, threshold*2.5] band even when a
+                        // racer-vs-racer pair is tighter.
+                        let lingerPair = null;
+                        if (isFullLess && state.playerName) {
+                            lingerPair = findLingeringPlayerPair(
+                                getActiveRacers(), completions, threshold, lingerCap, state.playerName
+                            );
+                        }
+                        if (!lingerPair) {
+                            lingerPair = findLingeringPair(
+                                getActiveRacers(), completions, threshold, lingerCap
+                            );
+                        }
                         if (lingerPair) {
                             const key = proximityPairKey(lingerPair.front.name, lingerPair.back.name);
                             const last = recentProximityPairs[key] || 0;
@@ -3839,10 +3868,28 @@
                     const proxKey = state._proximityUseLingering
                         ? 'proximityLingering'
                         : 'proximity';
-                    pushLine(
-                        fill(pickLine(proxPool, proxKey), { p1name: p1.name, p2name: p2.name }),
-                        'position', ICON.proximity
-                    );
+                    let proxText = fill(pickLine(proxPool, proxKey), {
+                        p1name: p1.name, p2name: p2.name
+                    });
+                    // Per spec v4.0.4: when the same player-vs-racer
+                    // combination fires twice in a row, prefix the line
+                    // with "Still - " so it reads as a continuation of
+                    // the previous proximity beat rather than a fresh
+                    // event. Only applies when the player is in the
+                    // pair (the spec scopes this to player-vs-racer).
+                    // The state slot updates on every player-pair fire
+                    // and is cleared otherwise so the prefix only ever
+                    // fires for true back-to-back repeats.
+                    const currentKey = proximityPairKey(p1.name, p2.name);
+                    if (playerInPair) {
+                        if (state.lastFiredProximityKey === currentKey) {
+                            proxText = 'Still - ' + proxText;
+                        }
+                        state.lastFiredProximityKey = currentKey;
+                    } else {
+                        state.lastFiredProximityKey = null;
+                    }
+                    pushLine(proxText, 'position', ICON.proximity);
                 }
                 // Advance the cadence whether or not we fired. When we did
                 // fire, use the full gap to space lines out. When we didn't
@@ -4272,6 +4319,42 @@
         return best;
     }
 
+    // Per spec v4.0.4: variant of findClosestPair that ONLY considers
+    // adjacent pairs where the player is one of the two racers. Lets the
+    // proximity flow surface a player-vs-racer duel even when the
+    // absolute closest pair on the track is a racer-vs-racer duel
+    // elsewhere. Used when the throttle slider is at LESS so the user
+    // sees the player's own battles even if they aren't the tightest
+    // gap on the board.
+    function findClosestPlayerPair (racers, completions, thresholdPct, playerName) {
+        if (!playerName) return null;
+        if (!racers || racers.length < 2) return null;
+        if (!completions || Object.keys(completions).length < 2) return null;
+        const ranked = [];
+        for (let i = 0; i < racers.length; i++) {
+            const r = racers[i];
+            if (!r || !r.name) continue;
+            const c = completions[r.name];
+            if (typeof c !== 'number') continue;
+            ranked.push({ r: r, c: c });
+        }
+        if (ranked.length < 2) return null;
+        ranked.sort(function (a, b) { return b.c - a.c; });
+        let best = null;
+        for (let i = 0; i < ranked.length - 1; i++) {
+            const front = ranked[i].r;
+            const back = ranked[i + 1].r;
+            const playerHere = (front.name === playerName || back.name === playerName);
+            if (!playerHere) continue;
+            const gap = ranked[i].c - ranked[i + 1].c;
+            if (gap >= thresholdPct) continue;
+            if (!best || gap < best.gap) {
+                best = { front: front, back: back, gap: gap };
+            }
+        }
+        return best;
+    }
+
     // Per spec v2.92: "refusing to drop away" pair finder. Returns the
     // adjacent pair whose gap is LARGER than the close-proximity threshold
     // but still within (threshold, lingerCapPct] - i.e. the chaser is in
@@ -4300,6 +4383,40 @@
             if (gap > lingerCapPct) continue;
             if (!best || gap < best.gap) {
                 best = { front: ranked[i].r, back: ranked[i + 1].r, gap: gap };
+            }
+        }
+        return best;
+    }
+
+    // Per spec v4.0.4: player-prefixed variant of findLingeringPair.
+    // Same role as findClosestPlayerPair (surface a player duel even
+    // when a tighter racer-on-racer pair exists elsewhere) but for the
+    // "refusing to drop away" range above the close-prox threshold.
+    function findLingeringPlayerPair (racers, completions, thresholdPct, lingerCapPct, playerName) {
+        if (!playerName) return null;
+        if (!racers || racers.length < 2) return null;
+        if (!completions || Object.keys(completions).length < 2) return null;
+        const ranked = [];
+        for (let i = 0; i < racers.length; i++) {
+            const r = racers[i];
+            if (!r || !r.name) continue;
+            const c = completions[r.name];
+            if (typeof c !== 'number') continue;
+            ranked.push({ r: r, c: c });
+        }
+        if (ranked.length < 2) return null;
+        ranked.sort(function (a, b) { return b.c - a.c; });
+        let best = null;
+        for (let i = 0; i < ranked.length - 1; i++) {
+            const front = ranked[i].r;
+            const back = ranked[i + 1].r;
+            const playerHere = (front.name === playerName || back.name === playerName);
+            if (!playerHere) continue;
+            const gap = ranked[i].c - ranked[i + 1].c;
+            if (gap <= thresholdPct) continue;
+            if (gap > lingerCapPct) continue;
+            if (!best || gap < best.gap) {
+                best = { front: front, back: back, gap: gap };
             }
         }
         return best;
@@ -4708,6 +4825,10 @@
                 state.lastArrowPos = 0;
                 state.posArrowDir = null;
                 state.lastLapMsgFired = false;
+                // Per spec v4.0.4: clear the proximity-pair memo used
+                // for the "Still - " continuation prefix so a new race
+                // starts without inheriting last race's duel.
+                state.lastFiredProximityKey = null;
                 state.racers = [];
                 state.prevRacers = [];
                 state.racerCount = 0;
