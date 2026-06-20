@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      4.0.0
+// @version      4.0.1
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '4.0.0';
+    const SCRIPT_VERSION = '4.0.1';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -1151,6 +1151,37 @@
                 '{faller} concedes ground, sliding from {fallerFrom} to {fallerTo}.',
                 '{faller} under pressure, dropping from {fallerFrom} to {fallerTo}.'
             ],
+            // Per spec v4.0.1: when an overtake happens (one racer gains the
+            // exact position another racer just lost), 50% of the time merge
+            // the two separate "up" + "down" lines into a single overtake
+            // line. overtakeUp focuses on the racer moving past (up arrow);
+            // overtakeDown focuses on the racer being passed (down arrow).
+            // Each line names BOTH racers so context is preserved while
+            // halving the feed traffic for these events.
+            overtakeUp: [
+                '{mover} overtakes {faller}, moving up to {moverTo}.',
+                '{mover} slips past {faller} for {moverTo}.',
+                '{mover} makes the move on {faller} - now {moverTo}.',
+                '{mover} forces past {faller}, taking {moverTo}.',
+                '{mover} pulls alongside {faller} and edges through to {moverTo}.',
+                '{mover} takes {moverTo} off {faller}.',
+                '{mover} dives past {faller} into {moverTo}.',
+                '{mover} muscles past {faller} for {moverTo}.',
+                'Clean pass from {mover} on {faller} - up to {moverTo}.',
+                '{mover} works {faller} over for {moverTo}.'
+            ],
+            overtakeDown: [
+                '{faller} loses {fallerFrom} to {mover}, dropping to {fallerTo}.',
+                "{faller} can't hold off {mover}, slipping to {fallerTo}.",
+                '{faller} drops behind {mover}, now {fallerTo}.',
+                '{faller} concedes the spot to {mover}, settling at {fallerTo}.',
+                '{faller} is overtaken by {mover} into {fallerTo}.',
+                '{faller} gives way to {mover}, slipping back to {fallerTo}.',
+                '{faller} cedes the place to {mover}, now {fallerTo}.',
+                '{faller} loses out to {mover}, dropping to {fallerTo}.',
+                "{faller} can't match {mover}, falling to {fallerTo}.",
+                '{faller} is shuffled back to {fallerTo} by {mover}.'
+            ],
             proximity: [
                 '{p1name} coming very close to {p2name} - side by side through the sector!',
                 'Intense battle between {p1name} and {p2name}. Barely a car width between them.',
@@ -1371,7 +1402,7 @@
 
     let recentByType = {
         ambient: [], player: [], position: [],
-        moverUp: [], moverDown: [],
+        moverUp: [], moverDown: [], overtakeUp: [], overtakeDown: [],
         moverDownEngine: [], moverDownTyre: [], moverDownMiscalc: [],
         proximity: [], funny: [], crash: [], waiting: []
     };
@@ -2480,7 +2511,7 @@
             });
             recentByType = p.recentByType || {
                 ambient: [], player: [], position: [],
-                moverUp: [], moverDown: [],
+                moverUp: [], moverDown: [], overtakeUp: [], overtakeDown: [],
                 moverDownEngine: [], moverDownTyre: [], moverDownMiscalc: [],
                 proximity: [], funny: [], crash: [], waiting: []
             };
@@ -3378,7 +3409,7 @@
         feedLines = [];
         recentByType = {
             ambient: [], player: [], position: [],
-            moverUp: [], moverDown: [],
+            moverUp: [], moverDown: [], overtakeUp: [], overtakeDown: [],
             moverDownEngine: [], moverDownTyre: [], moverDownMiscalc: [],
             proximity: [], funny: [], crash: [], waiting: []
         };
@@ -3785,7 +3816,19 @@
                 // No else branch - when scraping fails or no pair is close
                 // enough, proximity stays silent. This is correct: better
                 // no commentary than wrong commentary.
-                if (p1 && p2 && bigRaceShouldShow()) {
+                // Per spec v4.0.1: when slider is at LESS, ONLY player-
+                // related messages should pass. The proximity pool fires
+                // for both racer-on-racer and player-on-racer pairs, so
+                // we need to detect whether the player is in the pair
+                // and pass that to bigRaceShouldShow as the player-
+                // related flag - otherwise the throttle treats every
+                // proximity line as non-player and suppresses all of
+                // them at slider=0, hiding even the duels the player
+                // is in.
+                const playerInPair = p1 && p2 && (
+                    p1.name === state.playerName || p2.name === state.playerName
+                );
+                if (p1 && p2 && bigRaceShouldShow(playerInPair)) {
                     // Per spec v2.92: pick the right pool based on which
                     // tier matched. Lingering uses the dedicated "refusing
                     // to drop away" pool; close uses the original tight-
@@ -3845,7 +3888,63 @@
         });
         gains.sort(function (a, b) { return (b.isLeader ? 1 : 0) - (a.isLeader ? 1 : 0); });
         losses.sort(function (a, b) { return (b.isLeader ? 1 : 0) - (a.isLeader ? 1 : 0); });
+
+        // Per spec v4.0.1: detect overtake pairs - a gain and a loss
+        // where the gainer moved into the loser's old slot AND the
+        // loser dropped into the gainer's old slot (a clean swap).
+        // For each detected swap, 50% chance to merge the two separate
+        // lines into a single overtake line that mentions both racers.
+        // Uses identity Sets so subsequent gains/losses iteration can
+        // skip already-merged entries. Each gain pairs with at most one
+        // loss (and vice versa) since a single overtake = one swap.
+        const handledGains = new Set();
+        const handledLosses = new Set();
+        const mergedPairs = [];
+        for (let i = 0; i < gains.length; i++) {
+            const g = gains[i];
+            for (let j = 0; j < losses.length; j++) {
+                const l = losses[j];
+                if (handledLosses.has(l)) continue;
+                if (g.r.posNum === l.prev && g.prev === l.r.posNum) {
+                    if (Math.random() < 0.5) {
+                        mergedPairs.push({ gain: g, loss: l });
+                        handledGains.add(g);
+                        handledLosses.add(l);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Fire the merged overtake lines first. 50% pick the up-variant
+        // (focus on the racer moving past, ICON.up) and 50% pick the
+        // down-variant (focus on the racer being passed, ICON.down).
+        // Player-involvement and leader-change always bypass the throttle
+        // exactly as the unmerged paths do.
+        mergedPairs.forEach(function (pair) {
+            const playerInPair = (pair.gain.r.name === state.playerName
+                                   || pair.loss.r.name === state.playerName);
+            const isLeader = pair.gain.isLeader || pair.loss.isLeader;
+            const useUp = Math.random() < 0.5;
+            const pool = useUp ? LINES.RACING.overtakeUp : LINES.RACING.overtakeDown;
+            const key = useUp ? 'overtakeUp' : 'overtakeDown';
+            const text = fill(pickLine(pool, key), {
+                mover: pair.gain.r.name,
+                moverFrom: ordinal(pair.gain.prev),
+                moverTo: ordinal(pair.gain.r.posNum),
+                faller: pair.loss.r.name,
+                fallerFrom: ordinal(pair.loss.prev),
+                fallerTo: ordinal(pair.loss.r.posNum)
+            });
+            const icon = useUp ? ICON.up : ICON.down;
+            if (playerInPair || isLeader || bigRaceShouldShow(playerInPair)) {
+                pushLine(text, playerInPair ? 'player' : 'position', icon);
+            }
+            if (isLeader) tPosCooldown = Date.now() + POSITION_COOLDOWN;
+        });
+
         gains.forEach(function (item) {
+            if (handledGains.has(item)) return;
             const isPlayer = item.r.name === state.playerName;
             const text = fill(pickLine(LINES.RACING.moverUp, 'moverUp'), {
                 mover: item.r.name, moverFrom: ordinal(item.prev), moverTo: ordinal(item.r.posNum)
@@ -3857,6 +3956,7 @@
             if (item.isLeader) tPosCooldown = Date.now() + POSITION_COOLDOWN;
         });
         losses.forEach(function (item) {
+            if (handledLosses.has(item)) return;
             const isPlayer = item.r.name === state.playerName;
             const rnd = Math.random();
             let pool; let key;
