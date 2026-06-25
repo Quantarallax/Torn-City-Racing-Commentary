@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      4.0.4
+// @version      4.0.5
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '4.0.4';
+    const SCRIPT_VERSION = '4.0.5';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -6913,6 +6913,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
     <div class="tc-cred-by">Created by <strong>${escH(AUTHOR)}</strong></div>
     <a class="tc-cred-plink" href="https://www.torn.com/profiles.php?XID=${AUTHOR_ID}" target="_blank" rel="noopener">View ${escH(AUTHOR)} on Torn</a>
     <a class="tc-cred-forum" href="https://www.torn.com/forums.php#/p=threads&amp;f=21&amp;t=16559767&amp;b=0&amp;a=0&amp;start=20&amp;to=0" target="_blank" rel="noopener">Forum link: Bugs, feedback and LIKES welcome!</a>
+    <a class="tc-cred-forum" href="https://greasyfork.org/en/users/1593713-quantarallax?sort=total_installs" target="_blank" rel="noopener">Sanxion's Other Scripts</a>
     <div class="tc-set-divider"></div>
     <div class="tc-set-row">
       <span class="tc-set-lbl">Commentary scroll</span>
