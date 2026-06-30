@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TORN CITY Race Commentary
 // @namespace    sanxion.tc.racecommentary
-// @version      4.0.5
+// @version      4.0.6
 // @description  Live race commentary overlay for Torn City racing
 // @author       Sanxion [2987640]
 // @updateURL    https://github.com/Quantarallax/Torn-City-Racing-Commentary/raw/refs/heads/main/Torn%20City%20Racing%20Commentary.user.js
@@ -21,7 +21,7 @@
 
     // ─── Constants ────────────────────────────────────────────────────────────────
     const SCRIPT_NAME = 'TORN CITY Race Commentary';
-    const SCRIPT_VERSION = '4.0.5';
+    const SCRIPT_VERSION = '4.0.6';
     const AUTHOR = 'Sanxion [2987640]';
     const AUTHOR_ID = '2987640';
     const POLL_MS = 1000;
@@ -6699,10 +6699,27 @@
 
     function makeDraggable (hudEl, handleEl) {
         let ox = 0, oy = 0, sl = 0, st = 0, dragging = false;
+        // Per spec v4.0.6: whole window is draggable, not just the
+        // header bar. To make that workable we have to skip any
+        // mousedown that lands on an interactive element (button,
+        // link, form control, scrollable list, settings link, etc) so
+        // those targets keep their native click/scroll/select
+        // behaviour. Walked up via closest() so a click on a child of
+        // one of these still counts as interactive. The bottom-right
+        // resize handle area is also excluded so the browser-native
+        // resize gesture continues to work without being hijacked.
+        const NON_DRAG = 'button, a, input, select, textarea, label, '
+            + '#tc-feed-inner, #tc-rc-lb-list, [contenteditable="true"], '
+            + '.tc-no-drag';
         handleEl.addEventListener('mousedown', function (e) {
-            if (e.target.tagName === 'BUTTON') return;
+            if (e.button !== 0) return;
+            if (e.target && e.target.closest && e.target.closest(NON_DRAG)) return;
+            const r0 = hudEl.getBoundingClientRect();
+            // ~16px resize handle in bottom-right corner: skip so the
+            // browser's CSS resize:both still picks the gesture up.
+            if ((r0.right - e.clientX) <= 16 && (r0.bottom - e.clientY) <= 16) return;
             dragging = true; ox = e.clientX; oy = e.clientY;
-            const r = hudEl.getBoundingClientRect(); sl = r.left; st = r.top;
+            sl = r0.left; st = r0.top;
             e.preventDefault();
         });
         document.addEventListener('mousemove', function (e) {
@@ -6985,7 +7002,7 @@ a.tc-link:hover{color:var(--c-blue);text-decoration:underline;}
         if (state.windowTop) { hud.style.top = state.windowTop; }
         if (state.windowWidth) { hud.style.width = state.windowWidth; }
         if (state.windowHeight) { hud.style.height = state.windowHeight; }
-        makeDraggable(hud, document.getElementById('tc-rc-drag'));
+        makeDraggable(hud, hud);
         document.getElementById('tc-rc-min').addEventListener('click', function () { setMinimised(!isMinimised); });
         document.getElementById('tc-btn-settings').addEventListener('click', function () {
             document.getElementById('tc-rc-main').style.display = 'none';
